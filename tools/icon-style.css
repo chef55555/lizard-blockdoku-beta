@@ -1,0 +1,25 @@
+html, body { margin: 0; padding: 0; width: 100vw; height: 100vh; background: transparent; overflow: hidden; }
+#tile {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 30% 25%, #F35FAE 0%, #B05FD9 55%, #8A4FBF 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+body.any #tile { border-radius: 22vmin; }
+#glyph {
+  font-size: 55vmin;
+  line-height: 1;
+  font-family: "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  filter: drop-shadow(0 3vmin 4vmin rgba(74, 29, 94, 0.4));
+}
+body.maskable #glyph { font-size: 42vmin; }
+.spark {
+  position: absolute;
+  font-family: "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+}
+.s1 { font-size: 13vmin; left: 16vmin; top: 14vmin; }
+.s2 { font-size: 9vmin; right: 15vmin; bottom: 18vmin; }
+body.maskable .s1 { left: 22vmin; top: 20vmin; font-size: 10vmin; }
+body.maskable .s2 { right: 21vmin; bottom: 24vmin; font-size: 7vmin; }

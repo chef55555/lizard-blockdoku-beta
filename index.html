@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#8A4FBF">
+  <title>Lizard's Blockdoku</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg-blob blob1" aria-hidden="true"></div>
+  <div class="bg-blob blob2" aria-hidden="true"></div>
+  <div class="bg-blob blob3" aria-hidden="true"></div>
+  <div id="floaters" aria-hidden="true"></div>
+
+  <div id="app">
+    <header>
+      <h1 id="title"><span class="mascot">&#x1F98E;</span> Lizard's Blockdoku</h1>
+      <p id="dedication">made with &#x1F49C; for my Lizard</p>
+    </header>
+
+    <div id="scoreRow">
+      <div class="pill score-pill"><span id="scoreVal">0</span></div>
+      <div class="pill combo-pill" id="comboPill"></div>
+      <div class="pill best-pill"><span class="crown">&#x1F451;</span> <span id="bestVal">0</span></div>
+      <button id="restartBtn" type="button" aria-label="Start over">&#x21BB;</button>
+    </div>
+
+    <div id="boardWrap">
+      <div id="board"></div>
+      <div id="watermark" aria-hidden="true">&#x1F98E;</div>
+      <svg class="corner-flower fl-tl" viewBox="0 0 24 24" aria-hidden="true"><g><circle cx="12" cy="5" r="4.4" fill="#F35FAE"/><circle cx="18.7" cy="9.9" r="4.4" fill="#F35FAE"/><circle cx="16.1" cy="17.8" r="4.4" fill="#F35FAE"/><circle cx="7.9" cy="17.8" r="4.4" fill="#F35FAE"/><circle cx="5.3" cy="9.9" r="4.4" fill="#F35FAE"/><circle cx="12" cy="12" r="3.6" fill="#FFC24B"/></g></svg>
+    <svg class="corner-flower fl-tr" viewBox="0 0 24 24" aria-hidden="true"><g><circle cx="12" cy="5" r="4.4" fill="#F35FAE"/><circle cx="18.7" cy="9.9" r="4.4" fill="#F35FAE"/><circle cx="16.1" cy="17.8" r="4.4" fill="#F35FAE"/><circle cx="7.9" cy="17.8" r="4.4" fill="#F35FAE"/><circle cx="5.3" cy="9.9" r="4.4" fill="#F35FAE"/><circle cx="12" cy="12" r="3.6" fill="#FFC24B"/></g></svg>
+      <svg class="corner-flower fl-bl" viewBox="0 0 24 24" aria-hidden="true"><g><circle cx="12" cy="5" r="4.4" fill="#F35FAE"/><circle cx="18.7" cy="9.9" r="4.4" fill="#F35FAE"/><circle cx="16.1" cy="17.8" r="4.4" fill="#F35FAE"/><circle cx="7.9" cy="17.8" r="4.4" fill="#F35FAE"/><circle cx="5.3" cy="9.9" r="4.4" fill="#F35FAE"/><circle cx="12" cy="12" r="3.6" fill="#FFC24B"/></g></svg>
+      <svg class="corner-flower fl-br" viewBox="0 0 24 24" aria-hidden="true"><g><circle cx="12" cy="5" r="4.4" fill="#F35FAE"/><circle cx="18.7" cy="9.9" r="4.4" fill="#F35FAE"/><circle cx="16.1" cy="17.8" r="4.4" fill="#F35FAE"/><circle cx="7.9" cy="17.8" r="4.4" fill="#F35FAE"/><circle cx="5.3" cy="9.9" r="4.4" fill="#F35FAE"/><circle cx="12" cy="12" r="3.6" fill="#FFC24B"/></g></svg>
+      <div id="fxLayer">
+        <div id="fxCenter"></div>
+      </div>
+    </div>
+
+    <div id="tray">
+      <div class="slot" data-slot="0"></div>
+      <div class="slot" data-slot="1"></div>
+      <div class="slot" data-slot="2"></div>
+    </div>
+  </div>
+
+  <div id="ghost" hidden></div>
+  <div id="glowPulse" hidden></div>
+  <div id="confettiLayer" aria-hidden="true"></div>
+
+  <div id="splash" class="overlay">
+    <div class="splash-card">
+      <div class="splash-mascot">&#x1F98E;</div>
+      <h2>For Lizard</h2>
+      <p class="splash-sub">a puzzle made with &#x1F49C;</p>
+      <p class="splash-tap">tap to play</p>
+    </div>
+  </div>
+
+  <div id="gameOver" class="overlay" hidden>
+    <div class="card">
+      <h2 id="gameOverTitle">Game Over</h2>
+      <p class="final-label">score</p>
+      <p id="finalScore" class="final-score">0</p>
+      <p class="final-best">&#x1F451; best <span id="finalBest">0</span></p>
+      <p id="sweetLine" class="sweet-line"></p>
+      <button id="playAgain" type="button" class="btn-main">Play Again</button>
+    </div>
+  </div>
+
+  <div id="confirmRestart" class="overlay" hidden>
+    <div class="card">
+      <h2>Start over?</h2>
+      <p class="sweet-line">Your current game will be lost</p>
+      <button id="confirmYes" type="button" class="btn-main">Start over</button>
+      <button id="confirmNo" type="button" class="btn-ghost">Keep playing</button>
+    </div>
+  </div>
+
+  <script src="game.js" defer></script>
+  <script>
+    /* Service worker registration lives in game.js; this is only a boot guard
+       so an old cached shell never runs without its script. */
+  </script>
+</body>
+</html>
