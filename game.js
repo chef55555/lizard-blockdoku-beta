@@ -19,7 +19,7 @@ const SAVE_KEY = IS_BETA ? 'lizard-blockdoku-beta' : 'lizard-blockdoku-v1';
 /* Global leaderboard endpoint (Lambda Function URL). Empty string disables
    the feature entirely; the game stays fully playable offline either way.
    window.__LB_URL__ is a test hook so the smoke suite can mock the API. */
-const LEADERBOARD_URL = (typeof window !== 'undefined' && window.__LB_URL__) || '';
+const LEADERBOARD_URL = (typeof window !== 'undefined' && window.__LB_URL__) || 'https://5hejgq4fhsbt7wcyq7p4pa55wi0iurts.lambda-url.us-east-1.on.aws';
 const LB_KEY = 'lizard-blockdoku-lb';
 
 const ICONS = ['\u{1F98E}', '\u{1F338}', '\u{1F49C}', '⭐', '\u{1F353}']; /* lizard flower heart star berry */

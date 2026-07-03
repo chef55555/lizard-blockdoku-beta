@@ -107,6 +107,17 @@ Resources:
       Principal: '*'
       FunctionUrlAuthType: NONE
 
+  # InvokeFunctionUrl alone was NOT sufficient for anonymous access on this
+  # account: the Function URL returned 403 AccessDeniedException until a plain
+  # lambda:InvokeFunction grant for Principal '*' was also present. Both
+  # statements are required. (FunctionUrlAuthType cannot be set on this action.)
+  FnInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Fn
+      Action: lambda:InvokeFunction
+      Principal: '*'
+
 Outputs:
   FunctionUrl:
     Description: Paste this into LEADERBOARD_URL in game.js

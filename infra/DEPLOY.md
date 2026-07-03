@@ -63,6 +63,10 @@ It looks like `https://xxxxxxxx.lambda-url.us-east-1.on.aws/`.
 
 ## 5. Smoke the API
 
+> **PowerShell gotcha:** `curl.exe -d '{"...json..."}'` mangles the quotes and
+> the Lambda replies `{"error":"bad json"}` / HTTP 400. Use `Invoke-RestMethod
+> -Body $body` for the POST cases below (GET is fine with either).
+
 Set `$U` to the Function URL (no trailing slash needed; trim one if present).
 
 ```powershell
@@ -115,6 +119,19 @@ budgets on an account are free. Alerts email thomas.sheffer@gmail.com at
 5. Note: the browser can only call the API from `https://chef55555.github.io`
    because CORS is pinned there. The beta site can VIEW the top 50 but never
    submits (IS_BETA guard); real submits only happen from the production URL.
+
+## Gotchas from the first real deploy (2026-07-03, account 172627761914)
+
+- **Function URL returned 403 `AccessDeniedException` on every GET/POST** even
+  though `AuthType` was `NONE` and the `lambda:InvokeFunctionUrl` grant for
+  `Principal: '*'` was present. Fix: the resource policy ALSO needs a plain
+  `lambda:InvokeFunction` grant for `Principal: '*'` (no `FunctionUrlAuthType`
+  condition — AWS rejects that flag on this action). Both statements are now in
+  `template.yml` (`FnUrlPermission` + `FnInvokePermission`), so a fresh deploy
+  is fine. Direct `aws lambda invoke` worked the whole time — that isolates a
+  403 like this to the URL auth layer, not your handler.
+- The AWS CLI installs to `C:\Program Files\Amazon\AWSCLIV2\aws.exe`. If `aws`
+  isn't on PATH yet, call it by that full path.
 
 ## Design notes (for future maintenance)
 
