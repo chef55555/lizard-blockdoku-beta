@@ -943,6 +943,22 @@ header { text-align: center; height: 56px; flex: none; }
   font-size: 14px;
   color: var(--text);
 }
+.help-item .ex {
+  display: block;
+  margin-top: 3px;
+  padding-left: 8px;
+  border-left: 2px solid var(--pill-border);
+  font-size: 12px;
+  font-style: italic;
+}
+.help-body h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--text);
+  text-align: center;
+  margin: 16px 0 4px;
+}
 
 /* ---- Leaderboard ---- */
 

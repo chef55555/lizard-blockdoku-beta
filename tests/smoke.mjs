@@ -237,6 +237,12 @@ check('light theme stamped on root', (await page.evaluate(() => document.documen
 await page.tap('#themeSeg button[data-theme-choice="auto"]');
 await page.tap('#scoreHelpBtn');
 check('scoring sheet opens from settings', (await page.locator('#scoreHelp:not([hidden])').count()) === 1);
+{
+  const sheetText = await page.locator('#scoreHelp .help-body').textContent();
+  check('sheet explains item earning', sheetText.includes('Rotate') && sheetText.includes('every 200 points')
+    && sheetText.includes('Undo') && sheetText.includes('Freeze'));
+  check('sheet gives scoring examples', (await page.locator('#scoreHelp .ex').count()) >= 7);
+}
 await page.tap('#scoreHelpClose');
 await page.tap('#settingsDone');
 await page.waitForTimeout(100);

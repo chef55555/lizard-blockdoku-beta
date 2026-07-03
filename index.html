@@ -152,13 +152,47 @@
     <div class="card sheet">
       <h2>How scoring works</h2>
       <div class="help-body">
-        <div class="help-item"><b>Place a piece</b><span>+1 point per block</span></div>
-        <div class="help-item"><b>Clear a set</b><span>fill a whole row, column, or 3x3 box: +18</span></div>
-        <div class="help-item"><b>Combo</b><span>sets cleared together are worth much more: x2 is +54, x3 is +90, x4 is +126...</span></div>
-        <div class="help-item"><b>Icon match</b><span>3 or more matching icons inside a cleared set: 3-4 icons +10, 5-6 +25, 7-8 +50</span></div>
-        <div class="help-item"><b>Perfect match</b><span>all 9 icons in a set the same: +100</span></div>
-        <div class="help-item"><b>Matching sets</b><span>the same icon matched across 2, 3, or 4+ sets cleared together: +50 / +100 / +200</span></div>
-        <div class="help-item"><b>Lizard power</b><span>&#x1F98E; bonuses always count double</span></div>
+        <div class="help-item">
+          <b>Place a piece</b><span>+1 point per block</span>
+          <em class="ex">A 4-block L piece pays +4</em>
+        </div>
+        <div class="help-item">
+          <b>Clear a set</b><span>fill a whole row, column, or 3x3 box: +18</span>
+          <em class="ex">Finish a row with a 2-block piece: 2 + 18 = +20</em>
+        </div>
+        <div class="help-item">
+          <b>Combo</b><span>sets cleared together are worth much more: x2 is +54, x3 is +90, x4 is +126...</span>
+          <em class="ex">One block lands the last cell of a row AND a column at once: +54 instead of 18 + 18</em>
+        </div>
+        <div class="help-item">
+          <b>Icon match</b><span>3 or more matching icons inside a cleared set: 3-4 icons +10, 5-6 +25, 7-8 +50</span>
+          <em class="ex">A cleared row holding 5 stars adds +25</em>
+        </div>
+        <div class="help-item">
+          <b>Perfect match</b><span>all 9 icons in a set the same: +100</span>
+          <em class="ex">A 3x3 box of 9 strawberries adds +100</em>
+        </div>
+        <div class="help-item">
+          <b>Matching sets</b><span>the same icon matched across 2, 3, or 4+ sets cleared together: +50 / +100 / +200</span>
+          <em class="ex">A row and a column clear together, both with 3+ flowers: +50 on top of both flower bonuses</em>
+        </div>
+        <div class="help-item">
+          <b>Lizard power</b><span>&#x1F98E; bonuses always count double</span>
+          <em class="ex">3 lizards pay +20, and a perfect lizard set pays +200</em>
+        </div>
+        <h3>Earning items</h3>
+        <div class="help-item">
+          <b>&#x1F504; Rotate</b><span>one for every 200 points you score</span>
+        </div>
+        <div class="help-item">
+          <b>&#x21A9;&#xFE0F; Undo</b><span>one for every 2nd combo (x2 or bigger)</span>
+        </div>
+        <div class="help-item">
+          <b>&#x2744;&#xFE0F; Freeze</b><span>one for every Perfect Match, plus one extra for x3+ combos</span>
+        </div>
+        <div class="help-item">
+          <em class="ex">You can hold at most 3 of each; extras are lost, so spend them!</em>
+        </div>
       </div>
       <button id="scoreHelpClose" type="button" class="btn-main">Got it</button>
     </div>
