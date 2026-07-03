@@ -16,6 +16,12 @@ const PLAYER_NAME = 'Lizard';
 const IS_BETA = typeof location !== 'undefined' && location.pathname.includes('-beta');
 const SAVE_KEY = IS_BETA ? 'lizard-blockdoku-beta' : 'lizard-blockdoku-v1';
 
+/* Global leaderboard endpoint (Lambda Function URL). Empty string disables
+   the feature entirely; the game stays fully playable offline either way.
+   window.__LB_URL__ is a test hook so the smoke suite can mock the API. */
+const LEADERBOARD_URL = (typeof window !== 'undefined' && window.__LB_URL__) || '';
+const LB_KEY = 'lizard-blockdoku-lb';
+
 const ICONS = ['\u{1F98E}', '\u{1F338}', '\u{1F49C}', '⭐', '\u{1F353}']; /* lizard flower heart star berry */
 const ICON_WEIGHTS = [8, 23, 23, 23, 23];
 const ICON_LABELS = ['Lizard Power!', 'Flower Match!', 'Heart Match!', 'Star Match!', 'Berry Match!'];
@@ -1720,6 +1726,142 @@ function initUI() {
     startTutorial();
   });
 
+  /* ---- Global leaderboard. Every call is best effort with a 5s timeout
+     and never awaited by gameplay; offline play is completely unaffected.
+     Beta deployments may view the board but never submit to it. ---- */
+  const lb = (() => {
+    function identity() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(LB_KEY));
+        if (raw && typeof raw.playerId === 'string' && typeof raw.secret === 'string') return raw;
+      } catch (err) { /* mint a fresh one */ }
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      const fresh = {
+        playerId: crypto.randomUUID(),
+        secret: Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join(''),
+        bestSubmitted: 0,
+      };
+      saveIdentity(fresh);
+      return fresh;
+    }
+    function saveIdentity(idn) {
+      try { localStorage.setItem(LB_KEY, JSON.stringify(idn)); } catch (err) { /* ignore */ }
+    }
+
+    async function call(path, opts) {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 5000);
+      try {
+        const res = await fetch(LEADERBOARD_URL.replace(/\/+$/, '') + path, { ...opts, signal: ctl.signal });
+        return await res.json();
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    /* bestSubmitted only advances when the server answers, so any failure
+       retries at the next game over, panel open, or reconnect. */
+    async function submitBest() {
+      if (!LEADERBOARD_URL || IS_BETA) return;
+      const idn = identity();
+      if (best <= (idn.bestSubmitted || 0)) return;
+      try {
+        const out = await call('/submit', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            playerId: idn.playerId,
+            secret: idn.secret,
+            name: meta.nickname || PLAYER_NAME,
+            score: best,
+          }),
+        });
+        if (out && (out.accepted === true || out.accepted === false)) {
+          idn.bestSubmitted = Math.max(best, out.best || 0);
+          saveIdentity(idn);
+        }
+      } catch (err) { /* offline or slow; try again later */ }
+    }
+
+    async function fetchTop() {
+      const out = await call('/top', { method: 'GET' });
+      if (!out || !Array.isArray(out.scores)) throw new Error('bad payload');
+      const scores = out.scores.slice(0, 50);
+      try { localStorage.setItem(LB_KEY + '-cache', JSON.stringify(scores)); } catch (err) { /* ignore */ }
+      return scores;
+    }
+
+    function cachedTop() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(LB_KEY + '-cache'));
+        return Array.isArray(raw) ? raw : null;
+      } catch (err) { return null; }
+    }
+
+    return { identity, submitBest, fetchTop, cachedTop };
+  })();
+
+  const lbPanelEl = $('lbPanel');
+  const lbBodyEl = $('lbBody');
+
+  /* Names come from strangers on the internet: textContent only, always. */
+  function renderLb(scores, statusText) {
+    lbBodyEl.textContent = '';
+    if (statusText) {
+      const p = document.createElement('p');
+      p.className = 'lb-status';
+      p.textContent = statusText;
+      lbBodyEl.appendChild(p);
+    }
+    if (!scores || !scores.length) {
+      if (!statusText) {
+        const p = document.createElement('p');
+        p.className = 'lb-status';
+        p.textContent = 'No scores yet. Be the first!';
+        lbBodyEl.appendChild(p);
+      }
+      return;
+    }
+    const myId = lb.identity().playerId;
+    scores.forEach((row, i) => {
+      const div = document.createElement('div');
+      div.className = 'lb-row' + (row.id === myId ? ' me' : '');
+      const rank = document.createElement('span');
+      rank.className = 'lb-rank';
+      rank.textContent = String(i + 1);
+      const name = document.createElement('span');
+      name.className = 'lb-name';
+      name.textContent = String(row.name == null ? '?' : row.name);
+      const pts = document.createElement('span');
+      pts.className = 'lb-pts';
+      pts.textContent = String(row.score);
+      div.append(rank, name, pts);
+      lbBodyEl.appendChild(div);
+    });
+  }
+
+  async function openLeaderboard() {
+    lbPanelEl.hidden = false;
+    const cached = lb.cachedTop();
+    renderLb(cached, cached ? 'Refreshing...' : 'Loading...');
+    lb.submitBest(); /* natural retry point for an unsent best */
+    try {
+      renderLb(await lb.fetchTop());
+    } catch (err) {
+      renderLb(cached, cached ? 'Offline: showing the last scores' : 'Could not reach the leaderboard');
+    }
+  }
+
+  if (LEADERBOARD_URL) {
+    $('lbBtn').hidden = false;
+    $('lbGameOver').hidden = false;
+  }
+  $('lbBtn').addEventListener('click', () => { sound.tap(); openLeaderboard(); });
+  $('lbGameOver').addEventListener('click', () => { sound.tap(); openLeaderboard(); });
+  $('lbClose').addEventListener('click', () => { sound.tap(); lbPanelEl.hidden = true; });
+  window.addEventListener('online', () => lb.submitBest());
+
   /* ---- Overlays ---- */
   function showGameOver(newBest) {
     state = 'GAME_OVER';
@@ -1737,6 +1879,7 @@ function initUI() {
       headline.classList.remove('gold');
     }
     $('undoGameOver').hidden = !(inv.undo > 0 && undoSnapshot);
+    lb.submitBest();
     gameOverEl.hidden = false;
     void gameOverEl.offsetWidth; /* flush styles so the card entrance transition plays */
     gameOverEl.classList.add('show');

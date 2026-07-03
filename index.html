@@ -83,6 +83,7 @@
       <p id="sweetLine" class="sweet-line"></p>
       <button id="playAgain" type="button" class="btn-main">Play Again</button>
       <button id="undoGameOver" type="button" class="btn-ghost" hidden>&#x21A9;&#xFE0F; Undo last move</button>
+      <button id="lbGameOver" type="button" class="btn-ghost" hidden>&#x1F3C6; Leaderboard</button>
     </div>
   </div>
 
@@ -132,9 +133,18 @@
         <label for="nickInput">Nickname</label>
         <input type="text" id="nickInput" maxlength="16" placeholder="Lizard" autocomplete="off" spellcheck="false">
       </div>
+      <button id="lbBtn" type="button" class="btn-ghost" hidden>&#x1F3C6; Leaderboard</button>
       <button id="scoreHelpBtn" type="button" class="btn-ghost">How scoring works</button>
       <button id="replayTutorial" type="button" class="btn-ghost">Replay tutorial</button>
       <button id="settingsDone" type="button" class="btn-main">Done</button>
+    </div>
+  </div>
+
+  <div id="lbPanel" class="overlay" hidden>
+    <div class="card sheet">
+      <h2>&#x1F3C6; Leaderboard</h2>
+      <div id="lbBody" class="help-body"></div>
+      <button id="lbClose" type="button" class="btn-main">Close</button>
     </div>
   </div>
 

@@ -1,0 +1,113 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Lizard Block Mania global leaderboard: one on-demand DynamoDB table and
+  one Node.js Lambda behind a Function URL. Everything sits in the
+  permanent free tier at friends-and-family traffic levels.
+
+Resources:
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: lizard-leaderboard
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: lb
+          AttributeType: S
+        - AttributeName: score
+          AttributeType: N
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        # Sparse index: only player rows carry lb = "LB", so the top 50 is
+        # one descending Query and rate-limit rows never appear in it.
+        - IndexName: top
+          KeySchema:
+            - AttributeName: lb
+              KeyType: HASH
+            - AttributeName: score
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  FnRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: leaderboard-table-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt Table.Arn
+                  - !Sub '${Table.Arn}/index/top'
+
+  Fn:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: lizard-leaderboard
+      Runtime: nodejs22.x
+      Handler: index.handler
+      MemorySize: 128
+      Timeout: 5
+      # Abuse ceiling: the function can never fan out beyond 10 instances.
+      ReservedConcurrentExecutions: 10
+      Role: !GetAtt FnRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref Table
+      Code:
+        # Placeholder only; backend/index.mjs is pushed with
+        # `aws lambda update-function-code` after every stack deploy.
+        ZipFile: |
+          exports.handler = async () => ({
+            statusCode: 503,
+            headers: { 'content-type': 'application/json' },
+            body: '{"error":"deploying"}',
+          });
+
+  FnUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref Fn
+      AuthType: NONE
+      Cors:
+        AllowOrigins:
+          - https://chef55555.github.io
+        AllowMethods:
+          - GET
+          - POST
+        AllowHeaders:
+          - content-type
+        MaxAge: 86400
+
+  FnUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Fn
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
+Outputs:
+  FunctionUrl:
+    Description: Paste this into LEADERBOARD_URL in game.js
+    Value: !GetAtt FnUrl.FunctionUrl

@@ -36,6 +36,8 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  /* Never serve cross-origin requests (the leaderboard API) from the app cache. */
+  if (new URL(event.request.url).origin !== self.location.origin) return;
   event.respondWith(
     caches.match(event.request, { ignoreSearch: true }).then((hit) => hit || fetch(event.request))
   );

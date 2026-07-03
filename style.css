@@ -939,6 +939,45 @@ header { text-align: center; height: 56px; flex: none; }
   color: var(--text);
 }
 
+/* ---- Leaderboard ---- */
+
+.lb-status {
+  font-size: 13px;
+  color: var(--text-soft);
+  text-align: center;
+  margin: 6px 0;
+}
+.lb-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+.lb-row.me {
+  background: var(--ghost-fill);
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+.lb-rank {
+  min-width: 22px;
+  text-align: right;
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+}
+.lb-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-pts {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Tutorial coach ---- */
 
 #coach {

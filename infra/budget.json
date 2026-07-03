@@ -1,0 +1,6 @@
+{
+  "BudgetName": "lizard-leaderboard-budget",
+  "BudgetLimit": { "Amount": "1", "Unit": "USD" },
+  "TimeUnit": "MONTHLY",
+  "BudgetType": "COST"
+}

@@ -534,6 +534,64 @@ await page.tap('#confirmYes');
 await page.waitForTimeout(200);
 check('the offer never repeats', (await page.locator('#tutOffer:not([hidden])').count()) === 0);
 
+console.log('7m. Leaderboard: submit and panel against a mocked API');
+let submitBody = null;
+let submitCount = 0;
+await page.route('https://lb.test/**', async (route) => {
+  const req = route.request();
+  // Fulfilled cross-origin responses still face CORS checks in the browser.
+  const cors = {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET,POST',
+    'access-control-allow-headers': 'content-type',
+  };
+  if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+  if (req.url().endsWith('/submit') && req.method() === 'POST') {
+    submitBody = req.postDataJSON();
+    submitCount++;
+    return route.fulfill({ headers: cors, json: { accepted: true, best: submitBody.score } });
+  }
+  if (req.url().endsWith('/top')) {
+    return route.fulfill({ headers: cors, json: { scores: [
+      { id: 'friend-1', name: 'Tom<script>alert(1)</script>', score: 5000, when: 1 },
+      { id: (submitBody && submitBody.playerId) || 'nobody', name: 'Lizard', score: 101, when: 2 },
+    ] } });
+  }
+  return route.fulfill({ status: 404, headers: cors, json: { error: 'not found' } });
+});
+await page.addInitScript(() => { window.__LB_URL__ = 'https://lb.test'; });
+{
+  const board = new Array(81).fill(1);
+  for (let r = 0; r < 9; r++) { board[r * 9 + r] = -1; board[r * 9 + ((r + 4) % 9)] = -1; }
+  await injectSave({
+    v: 1, best: 5,
+    game: { board, tray: [{ shapeId: 0, icon: 4 }, { shapeId: 38, icon: 1 }, { shapeId: 38, icon: 2 }], score: 100 },
+  });
+}
+await dragPiece(0, 0, 0);
+await page.waitForSelector('#gameOver.show', { timeout: 5000 });
+await page.waitForTimeout(600);
+check('game over submits the new best', submitBody !== null && submitBody.score === 101,
+  JSON.stringify(submitBody));
+check('submit carries a UUID identity and hex secret',
+  submitBody !== null
+  && /^[0-9a-f-]{36}$/.test(submitBody.playerId)
+  && /^[0-9a-f]{32}$/.test(submitBody.secret));
+check('submit uses her name', submitBody !== null && submitBody.name === 'Lizard');
+check('acceptance advances bestSubmitted',
+  (await page.evaluate(() => JSON.parse(localStorage.getItem('lizard-blockdoku-lb')).bestSubmitted)) === 101);
+await page.tap('#lbGameOver');
+await page.waitForTimeout(500);
+check('leaderboard panel opens with rows', (await page.locator('.lb-row').count()) === 2);
+check('own row is highlighted', (await page.locator('.lb-row.me .lb-name').textContent()) === 'Lizard');
+check('hostile names render inert', (await page.locator('#lbBody script').count()) === 0
+  && (await page.locator('#lbBody').textContent()).includes('Tom<script>'));
+await page.tap('#lbClose');
+const countBefore = submitCount;
+await page.tap('#playAgain');
+await page.waitForTimeout(400);
+check('no resubmit when best is unchanged', submitCount === countBefore);
+
 console.log('8. Landscape browser tab still fits');
 await page.setViewportSize({ width: 844, height: 390 });
 await page.reload();
