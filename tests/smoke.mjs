@@ -79,6 +79,11 @@ await page.goto(BASE);
 await page.waitForSelector('.cell');
 check('81 board cells', (await page.locator('.cell').count()) === 81);
 await dismissSplash();
+check('new player auto-starts the tutorial', (await page.locator('#coach:not([hidden])').count()) === 1);
+check('tutorial never touches the save', (await page.evaluate(() => localStorage.getItem('lizard-blockdoku-v1'))) === null);
+await page.tap('#tutSkip');
+await page.waitForTimeout(200);
+check('skip ends the tutorial', (await page.locator('#coach:not([hidden])').count()) === 0);
 check('3 tray pieces', (await page.locator('.slot .piece').count()) === 3);
 check('score starts at 0', (await score()) === 0);
 await page.screenshot({ path: ART + 'mobile-fresh.png' });
@@ -457,6 +462,77 @@ await page.tap('#itemHelpOk');
 check('triple perfect scored 493', (await score()) === 493, 'score=' + (await score()));
 check('rotate stock from 493 points', (await page.locator('#itemRotate .cnt').textContent()) === '2');
 check('freeze stock capped at 3', (await page.locator('#itemFreeze .cnt').textContent()) === '3');
+
+console.log('7k. Tutorial: full walkthrough via settings replay');
+const scoreBeforeTut = await score();
+await page.tap('#settingsBtn');
+await page.waitForSelector('#settings:not([hidden])');
+await page.tap('#replayTutorial');
+await page.waitForTimeout(200);
+check('replay starts the tutorial', (await page.locator('#coach:not([hidden])').count()) === 1);
+check('step 1 welcomes her by name', (await page.locator('#coachText').textContent()).includes('Lizard'));
+await dragPiece(0, 0, 0); // step 1: place any piece
+await page.waitForTimeout(700);
+check('step 2 teaches clearing', (await page.locator('#coachText').textContent()).includes('Finish this row'));
+await dragPiece(0, 0, 0); // gated: wrong spot must snap back
+await page.waitForTimeout(400);
+check('gated drop snaps back', (await page.locator('.slot').nth(0).locator('.piece').count()) === 1);
+await dragPiece(0, 4, 7); // the required spot
+await page.waitForTimeout(1000);
+check('step 3 teaches icon bonuses', (await page.locator('#coachText').textContent()).includes('Match 3'));
+await dragPiece(0, 4, 7);
+await page.waitForTimeout(1000);
+check('step 4 teaches the previews', (await page.locator('#coachText').textContent()).includes('gold ring'));
+await dragPiece(0, 2, 8);
+await page.waitForTimeout(1000);
+check('step 5 grants a rotate', (await page.locator('#coachText').textContent()).includes('Rotate'));
+{
+  // pickup is gated until the piece is rotated
+  const slotBox = await page.locator('.slot').nth(0).boundingBox();
+  await page.mouse.move(slotBox.x + slotBox.width / 2, slotBox.y + slotBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(slotBox.x + slotBox.width / 2, slotBox.y - 120, { steps: 5 });
+  await page.mouse.up();
+  check('unrotated piece cannot be picked up', (await page.locator('#ghost[hidden]').count()) === 1);
+}
+await page.locator('.slot').nth(0).locator('.rot-btn').tap();
+await page.waitForTimeout(300);
+await dragPiece(0, 4, 6);
+await page.waitForTimeout(1000);
+check('step 6 explains undo and freeze', (await page.locator('#coachText').textContent()).includes('Undo'));
+await page.tap('#coachNext');
+check('step 7 points at settings', (await page.locator('#coachText').textContent()).includes('have fun'));
+check('last step offers Finish', (await page.locator('#coachNext').textContent()) === 'Finish');
+await page.tap('#coachNext');
+await page.waitForTimeout(200);
+check('finish ends the tutorial', (await page.locator('#coach:not([hidden])').count()) === 0);
+check('the real game came back intact', (await score()) === scoreBeforeTut, 'score=' + (await score()));
+
+console.log('7l. Tutorial: one-time offer for existing players');
+{
+  const board = new Array(81).fill(-1);
+  board[40] = 1;
+  await injectSave({
+    v: 2, best: 50,
+    game: {
+      board, tray: [{ shapeId: 0, icon: 1 }, { shapeId: 0, icon: 2 }, { shapeId: 1, icon: 3 }],
+      score: 10, inv: { rotate: 0, undo: 0, freeze: 0 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+await page.tap('#restartBtn');
+await page.waitForSelector('#confirmRestart:not([hidden])');
+await page.tap('#confirmYes');
+await page.waitForTimeout(200);
+check('existing player gets the offer once', (await page.locator('#tutOffer:not([hidden])').count()) === 1);
+await page.tap('#tutOfferNo');
+await page.waitForTimeout(100);
+check('declining is remembered', (await page.evaluate(() => JSON.parse(localStorage.getItem('lizard-blockdoku-v1')).tutorialOffered)) === true);
+await page.tap('#restartBtn');
+await page.waitForSelector('#confirmRestart:not([hidden])');
+await page.tap('#confirmYes');
+await page.waitForTimeout(200);
+check('the offer never repeats', (await page.locator('#tutOffer:not([hidden])').count()) === 0);
 
 console.log('8. Landscape browser tab still fits');
 await page.setViewportSize({ width: 844, height: 390 });

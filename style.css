@@ -939,6 +939,45 @@ header { text-align: center; height: 56px; flex: none; }
   color: var(--text);
 }
 
+/* ---- Tutorial coach ---- */
+
+#coach {
+  position: fixed;
+  z-index: 170;
+  max-width: 260px;
+  background: var(--card-bg);
+  border: 2px solid var(--card-border);
+  border-radius: 16px;
+  padding: 12px 14px;
+  box-shadow: 0 10px 28px rgba(74, 29, 94, 0.35);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  transition: left 250ms ease, top 250ms ease;
+}
+#coach .btn-main {
+  margin-top: 10px;
+  padding: 9px 16px;
+  font-size: 15px;
+}
+
+#tutSkip {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  right: 10px;
+  z-index: 171;
+  border: 1.5px solid var(--pill-border);
+  background: var(--pill-bg);
+  color: var(--text-soft);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 /* ---- Reduced motion ---- */
 
 @media (prefers-reduced-motion: reduce) {

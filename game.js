@@ -525,8 +525,9 @@ function initUI() {
   let freezeHold = false;
   let meta = defaultMeta();       /* volume, theme, nickname, tutorial + item-help flags */
   let undoSnapshot = null;        /* one level, in-memory only; gone after reload */
+  let tutorial = null;            /* { step, stash } while the tutorial runs */
   let hadSave = false;
-  let state = 'SPLASH';           /* SPLASH | IDLE | DRAGGING | RESOLVING | GAME_OVER | TUTORIAL */
+  let state = 'SPLASH';           /* SPLASH | IDLE | DRAGGING | RESOLVING | GAME_OVER */
   const rng = Math.random;
 
   let cellPx = 40;
@@ -854,6 +855,10 @@ function initUI() {
     e.preventDefault();
     sound.unlock();
     if (freezeArming) { dipPiece(slot); return; }
+    if (tutorial) {
+      const gate = TUT[tutorial.step].allowPickup;
+      if (gate && !gate(slot)) return;
+    }
     sound.pickup();
 
     drag.active = true;
@@ -1003,6 +1008,10 @@ function initUI() {
     if (!drag.active || e.pointerId !== drag.pointerId) return;
     if (drag.moved && drag.valid && drag.anchor) {
       const { row, col } = drag.anchor;
+      if (tutorial) {
+        const gate = TUT[tutorial.step].allowDrop;
+        if (gate && !gate(row, col)) { snapBack(); return; }
+      }
       endDrag();
       ghostEl.hidden = true;
       ghostEl.classList.remove('picked');
@@ -1198,13 +1207,14 @@ function initUI() {
     announceEarned(granted);
     persist();
 
-    if (over) {
+    if (over && !tutorial) {
       persist();
       await wait(GAMEOVER_DELAY);
       showGameOver(newBest);
     } else {
       state = 'IDLE';
       maybeShowItemHelp(granted);
+      if (tutorial) tutAdvance();
     }
   }
 
@@ -1526,6 +1536,190 @@ function initUI() {
     persist();
   }
 
+  /* ---- Interactive tutorial. Runs on the real engine against crafted
+     boards; the live game (and best) is stashed in memory and restored at
+     the end, and persist() is suppressed throughout, so the real save can
+     never see tutorial state. ---- */
+  const coachEl = $('coach');
+
+  const TUT = [
+    {
+      text: 'Hi ' + PLAYER_NAME + '! \u{1F49C} Drag any piece from the tray onto the board.',
+      setup() {
+        board = emptyBoard();
+        tray = [{ shapeId: 13, icon: 2 }, { shapeId: 5, icon: 1 }, { shapeId: 0, icon: 3 }];
+      },
+      anchor: () => trayEl,
+    },
+    {
+      text: 'Fill a whole row, column, or 3x3 box to clear it. Finish this row!',
+      setup() {
+        board = emptyBoard();
+        [1, 2, 3, 4, 1, 2, 3].forEach((icon, c) => { board[4 * N + c] = icon; });
+        tray = [{ shapeId: 1, icon: 4 }, null, null];
+      },
+      anchor: () => cellEls[4 * N + 7],
+      allowDrop: (r, c) => r === 4 && c === 7,
+    },
+    {
+      text: 'Match 3 or more of the same icon in a set you clear and it pays a bonus! Clear this flowery row \u{1F338}',
+      setup() {
+        board = emptyBoard();
+        [1, 1, 1, 1, 2, 3, 2].forEach((icon, c) => { board[4 * N + c] = icon; });
+        tray = [{ shapeId: 1, icon: 1 }, null, null];
+      },
+      anchor: () => cellEls[4 * N + 7],
+      allowDrop: (r, c) => r === 4 && c === 7,
+    },
+    {
+      text: 'Hold a piece over its spot before dropping: purple glow means it will clear, a gold ring means an icon bonus!',
+      setup() {
+        board = emptyBoard();
+        [2, 2, 2, 3, 4, 1, 3, 4].forEach((icon, c) => { board[2 * N + c] = icon; });
+        tray = [{ shapeId: 0, icon: 2 }, null, null];
+      },
+      anchor: () => cellEls[2 * N + 8],
+      allowDrop: (r, c) => r === 2 && c === 8,
+    },
+    {
+      text: 'Items! You just earned a Rotate. Tap the little ⟳ arrow on the piece, then finish the row!',
+      setup() {
+        board = emptyBoard();
+        [3, 1, 4, 2, 3, 1].forEach((icon, c) => { board[4 * N + c] = icon; });
+        board[5 * N + 6] = 2; /* blocks the unrotated drop */
+        inv = { rotate: 1, undo: 0, freeze: 0 };
+        tray = [{ shapeId: 6, icon: 4 }, null, null];
+      },
+      anchor: () => slotEls[0],
+      allowPickup: (slot) => !!tray[slot] && SHAPES[tray[slot].shapeId].h === 1,
+      allowDrop: (r, c) => r === 4 && c === 6,
+    },
+    {
+      text: '↩️ Undo takes back your last move. ❄️ Freeze dips a piece so finished sets wait one turn and melt into a bigger combo. You earn items by scoring!',
+      setup() {
+        board = emptyBoard();
+        tray = [null, null, null];
+      },
+      anchor: () => itemsBarEl,
+      next: true,
+    },
+    {
+      text: 'The ⚙️ button has volume, themes, and the full scoring guide. That is everything: have fun, ' + PLAYER_NAME + '! \u{1F49C}',
+      setup() {
+        board = emptyBoard();
+        tray = [null, null, null];
+      },
+      anchor: () => $('settingsBtn'),
+      next: true,
+      nextLabel: 'Finish',
+    },
+  ];
+
+  function startTutorial() {
+    if (tutorial || state !== 'IDLE') return;
+    tutorial = {
+      step: -1,
+      stash: { board, tray, score, best, inv, progress, frozen, freezeHold, undoSnapshot },
+    };
+    score = 0;
+    undoSnapshot = null;
+    setArming(false);
+    updateScoreDisplay(true);
+    $('tutSkip').hidden = false;
+    nextTutStep();
+  }
+
+  function endTutorial() {
+    if (!tutorial) return;
+    const s = tutorial.stash;
+    tutorial = null;
+    board = s.board;
+    tray = s.tray;
+    score = s.score;
+    best = s.best;
+    inv = s.inv;
+    progress = s.progress;
+    frozen = s.frozen;
+    freezeHold = s.freezeHold;
+    undoSnapshot = s.undoSnapshot;
+    meta.seenTutorial = true;
+    coachEl.hidden = true;
+    $('tutSkip').hidden = true;
+    renderBoard();
+    renderTray();
+    updateItemsBar();
+    updateScoreDisplay(true);
+    state = 'IDLE';
+    persist();
+  }
+
+  function tutAdvance() {
+    if (tutorial) nextTutStep();
+  }
+
+  function nextTutStep() {
+    tutorial.step++;
+    if (tutorial.step >= TUT.length) { endTutorial(); return; }
+    const s = TUT[tutorial.step];
+    inv = { rotate: 0, undo: 0, freeze: 0 };
+    progress = { pts: 0, combos: 0 };
+    frozen = new Uint8Array(CELL_COUNT);
+    freezeHold = false;
+    s.setup();
+    renderBoard();
+    renderTray();
+    updateItemsBar();
+    showCoach(s);
+  }
+
+  function showCoach(s) {
+    $('coachText').textContent = s.text;
+    const nextBtn = $('coachNext');
+    nextBtn.hidden = !s.next;
+    nextBtn.textContent = s.nextLabel || 'Next';
+    coachEl.hidden = false;
+    positionCoach(s.anchor());
+  }
+
+  /* Above the anchor when there is room, below it otherwise */
+  function positionCoach(el) {
+    const r = el.getBoundingClientRect();
+    const cw = coachEl.offsetWidth;
+    const ch = coachEl.offsetHeight;
+    let x = r.left + r.width / 2 - cw / 2;
+    x = Math.max(8, Math.min(document.documentElement.clientWidth - cw - 8, x));
+    let y = r.top - ch - 12;
+    if (y < 8) y = r.bottom + 12;
+    coachEl.style.left = x + 'px';
+    coachEl.style.top = y + 'px';
+  }
+
+  $('coachNext').addEventListener('click', () => { sound.tap(); tutAdvance(); });
+  $('tutSkip').addEventListener('click', () => {
+    if (state !== 'IDLE') return;
+    sound.tap();
+    endTutorial();
+  });
+
+  /* Offered exactly once to existing players, at their next new game */
+  function maybeOfferTutorial() {
+    if (meta.seenTutorial || meta.tutorialOffered || tutorial) return;
+    meta.tutorialOffered = true;
+    persist();
+    $('tutOffer').hidden = false;
+  }
+  $('tutOfferYes').addEventListener('click', () => {
+    sound.tap();
+    $('tutOffer').hidden = true;
+    startTutorial();
+  });
+  $('tutOfferNo').addEventListener('click', () => { sound.tap(); $('tutOffer').hidden = true; });
+  $('replayTutorial').addEventListener('click', () => {
+    sound.tap();
+    settingsEl.hidden = true;
+    startTutorial();
+  });
+
   /* ---- Overlays ---- */
   function showGameOver(newBest) {
     state = 'GAME_OVER';
@@ -1574,11 +1768,12 @@ function initUI() {
     gameOverEl.hidden = true;
     confirmEl.hidden = true;
     state = 'IDLE';
+    maybeOfferTutorial();
   }
 
   $('playAgain').addEventListener('click', () => { sound.tap(); resetGame(); });
   $('restartBtn').addEventListener('click', () => {
-    if (state !== 'IDLE') return;
+    if (state !== 'IDLE' || tutorial) return;
     sound.tap();
     confirmEl.hidden = false;
   });
@@ -1627,7 +1822,7 @@ function initUI() {
   }
 
   $('settingsBtn').addEventListener('click', () => {
-    if (state !== 'IDLE') return;
+    if (state !== 'IDLE' || tutorial) return;
     sound.tap();
     syncSettingsUI();
     settingsEl.hidden = false;
@@ -1669,12 +1864,14 @@ function initUI() {
     splashEl.classList.add('gone');
     setTimeout(() => { splashEl.hidden = true; }, 400);
     state = 'IDLE';
+    /* Brand-new player: walk her through it (skippable) */
+    if (!hadSave && !meta.seenTutorial) startTutorial();
   });
 
   /* ---- Persistence ---- */
   function persist() {
     try {
-      if (state === 'TUTORIAL') return; /* tutorial state never touches the save */
+      if (tutorial) return; /* the tutorial never touches the real save */
       meta.best = best;
       meta.muted = sound.isMuted();
       const over = state === 'GAME_OVER' || isGameOver(board, tray);

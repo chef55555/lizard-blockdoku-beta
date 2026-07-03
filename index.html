@@ -54,6 +54,12 @@
     </div>
   </div>
 
+  <div id="coach" hidden>
+    <p id="coachText"></p>
+    <button id="coachNext" type="button" class="btn-main" hidden>Next</button>
+  </div>
+  <button id="tutSkip" type="button" hidden>Skip tutorial</button>
+
   <div id="toastLayer" aria-live="polite"></div>
   <div id="ghost" hidden></div>
   <div id="glowPulse" hidden></div>
@@ -89,6 +95,15 @@
     </div>
   </div>
 
+  <div id="tutOffer" class="overlay" hidden>
+    <div class="card">
+      <h2>Try the tutorial?</h2>
+      <p class="sweet-line">There are new items and bonuses to learn &#x1F49C;</p>
+      <button id="tutOfferYes" type="button" class="btn-main">Show me!</button>
+      <button id="tutOfferNo" type="button" class="btn-ghost">No thanks</button>
+    </div>
+  </div>
+
   <div id="itemHelp" class="overlay" hidden>
     <div class="card">
       <div id="itemHelpIcon" class="item-help-icon"></div>
@@ -118,6 +133,7 @@
         <input type="text" id="nickInput" maxlength="16" placeholder="Lizard" autocomplete="off" spellcheck="false">
       </div>
       <button id="scoreHelpBtn" type="button" class="btn-ghost">How scoring works</button>
+      <button id="replayTutorial" type="button" class="btn-ghost">Replay tutorial</button>
       <button id="settingsDone" type="button" class="btn-main">Done</button>
     </div>
   </div>
