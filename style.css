@@ -87,6 +87,10 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* The hidden attribute must always win, even over display: block rules
+   (buttons like .btn-main set display and would otherwise ignore it). */
+[hidden] { display: none !important; }
+
 html {
   touch-action: manipulation;
   -webkit-user-select: none;
@@ -215,6 +219,7 @@ header { text-align: center; height: 56px; flex: none; }
   background: var(--pill-bg);
   border: 1px solid var(--pill-border);
   border-radius: 999px;
+  white-space: nowrap;
   padding: 6px 16px;
   font-family: var(--font-display);
   font-weight: 600;

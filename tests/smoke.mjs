@@ -471,6 +471,7 @@ await page.tap('#replayTutorial');
 await page.waitForTimeout(200);
 check('replay starts the tutorial', (await page.locator('#coach:not([hidden])').count()) === 1);
 check('step 1 welcomes her by name', (await page.locator('#coachText').textContent()).includes('Lizard'));
+check('interactive steps hide the Next button', (await page.locator('#coachNext').isVisible()) === false);
 await dragPiece(0, 0, 0); // step 1: place any piece
 await page.waitForTimeout(700);
 check('step 2 teaches clearing', (await page.locator('#coachText').textContent()).includes('Finish this row'));
