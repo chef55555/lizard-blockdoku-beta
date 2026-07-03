@@ -144,6 +144,19 @@ header { text-align: center; height: 56px; flex: none; }
   color: var(--text-soft);
 }
 
+.beta-tag {
+  display: inline-block;
+  vertical-align: super;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #4A1D5E;
+  font-size: 10px;
+  letter-spacing: 1px;
+  -webkit-text-fill-color: #4A1D5E;
+}
+
 /* ---- Score row ---- */
 
 #scoreRow {

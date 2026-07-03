@@ -7,7 +7,12 @@
    ================================================================ */
 
 const PLAYER_NAME = 'Lizard';
-const SAVE_KEY = 'lizard-blockdoku-v1';
+
+/* Beta channel: the same code deployed under .../lizard-blockdoku-beta/ gets
+   its own save (github.io shares one localStorage origin across repos) and
+   never submits to the real leaderboard. */
+const IS_BETA = typeof location !== 'undefined' && location.pathname.includes('-beta');
+const SAVE_KEY = IS_BETA ? 'lizard-blockdoku-beta' : 'lizard-blockdoku-v1';
 
 const ICONS = ['\u{1F98E}', '\u{1F338}', '\u{1F49C}', '⭐', '\u{1F353}']; /* lizard flower heart star berry */
 const ICON_WEIGHTS = [8, 23, 23, 23, 23];
@@ -1065,6 +1070,13 @@ function initUI() {
   }
 
   /* ---- Boot ---- */
+  if (IS_BETA) {
+    const tag = document.createElement('span');
+    tag.className = 'beta-tag';
+    tag.textContent = 'BETA';
+    $('title').appendChild(tag);
+  }
+
   restore();
   relayout();
   renderBoard();
