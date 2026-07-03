@@ -304,7 +304,7 @@ test('save v2 round-trip preserves everything', () => {
   G.placePiece(b, G.SHAPES[13], 3, 3, 2);
   const frozen = new Uint8Array(81);
   frozen[3 * 9 + 3] = 1;
-  const tray = [{ ...G.makePiece(rng), frozen: true }, null, { ...G.makePiece(rng), rotFree: true }];
+  const tray = [{ ...G.makePiece(rng), frozen: true }, null, { shapeId: 1, icon: 3, rotFree: true, rotOrig: 2 }];
   const game = G.encodeGame({
     board: b, tray, score: 123,
     inv: { rotate: 2, undo: 1, freeze: 3 },
@@ -408,6 +408,41 @@ test('validateSave: hostile v2 fields', () => {
     game: { ...base.game, tray: [{ shapeId: 0, icon: 1, rotFree: 'yes' }, null, null] },
   });
   assert.strictEqual(badRotFree.game, null, 'non-boolean rotFree rejected');
+});
+
+test('validateSave: rotOrig acceptance, hostile values, and symmetric scrub', () => {
+  const empty = new Array(81).fill(-1);
+  const mk = (piece) => G.validateSave({
+    v: 2, best: 1,
+    game: { board: empty.slice(), tray: [piece, null, null], score: 5 },
+  });
+
+  /* Happy path: rotFree Line3-V (shape 6) that started as Line3-H (shape 5). */
+  const good = mk({ shapeId: 6, icon: 3, rotFree: true, rotOrig: 5 });
+  assert.ok(good.game, 'valid rotOrig accepted');
+  assert.deepStrictEqual(good.game.tray[0], { shapeId: 6, icon: 3, rotFree: true, rotOrig: 5 });
+
+  /* Non-integer rotOrig discards the game. */
+  assert.strictEqual(mk({ shapeId: 6, icon: 3, rotFree: true, rotOrig: '5' }).game, null, 'string rotOrig rejected');
+  /* Out-of-range rotOrig discards the game. */
+  assert.strictEqual(mk({ shapeId: 6, icon: 3, rotFree: true, rotOrig: 99 }).game, null, 'out-of-range rotOrig rejected');
+  /* rotOrig equal to the current shape discards the game. */
+  assert.strictEqual(mk({ shapeId: 6, icon: 3, rotFree: true, rotOrig: 6 }).game, null, 'self rotOrig rejected');
+  /* rotOrig outside this piece's rotation orbit discards the game (shape 6's
+     orbit is {5,6}; shape 0 is not in it). */
+  assert.strictEqual(mk({ shapeId: 6, icon: 3, rotFree: true, rotOrig: 0 }).game, null, 'out-of-orbit rotOrig rejected');
+
+  /* rotOrig without an active session is silently dropped, game survives. */
+  const noSession = mk({ shapeId: 6, icon: 3, rotOrig: 5 });
+  assert.ok(noSession.game, 'rotOrig without rotFree keeps the game');
+  assert.strictEqual(noSession.game.tray[0].rotOrig, undefined, 'orphan rotOrig dropped');
+  assert.strictEqual(noSession.game.tray[0].rotFree, undefined);
+
+  /* rotFree on a symmetric shape is silently scrubbed (live-save migration). */
+  const scrub = mk({ shapeId: 13, icon: 2, rotFree: true });
+  assert.ok(scrub.game, 'symmetric rotFree keeps the game');
+  assert.strictEqual(scrub.game.tray[0].rotFree, undefined, 'rotFree scrubbed off a symmetric shape');
+  assert.deepStrictEqual(scrub.game.tray[0], { shapeId: 13, icon: 2 });
 });
 
 test('sanitizeNickname: strips markup, collapses whitespace, caps length', () => {
@@ -523,6 +558,141 @@ test('rotateShapeCells matches geometry', () => {
     G.rotateShapeCells([[0, 0], [1, 0], [1, 1]], 2).map(([r, c]) => r + ',' + c).sort(),
     ['0,0', '0,1', '1,0'].sort()
   );
+});
+
+/* ---- applyRotation: charge / free / cancel / symmetric / null ---- */
+
+test('applyRotation: symmetric shape never charges and leaves the piece alone', () => {
+  const piece = { shapeId: 13, icon: 2 }; /* square is a fixed point */
+  const res = G.applyRotation(piece, 3);
+  assert.strictEqual(res.kind, 'symmetric');
+  assert.strictEqual(res.rotateCount, 3, 'no item spent');
+  assert.strictEqual(res.piece, piece, 'piece unchanged');
+});
+
+test('applyRotation: first spin charges one and remembers the origin', () => {
+  const piece = { shapeId: 5, icon: 3 }; /* Line3-H, ROTATION_MAP[5] = 6 */
+  const res = G.applyRotation(piece, 2);
+  assert.strictEqual(res.kind, 'charged');
+  assert.strictEqual(res.rotateCount, 1, 'one rotate spent');
+  assert.deepStrictEqual(res.piece, { shapeId: 6, icon: 3, rotFree: true, rotOrig: 5 });
+});
+
+test('applyRotation: charging preserves a dipped (frozen) flag', () => {
+  const res = G.applyRotation({ shapeId: 5, icon: 3, frozen: true }, 1);
+  assert.strictEqual(res.kind, 'charged');
+  assert.strictEqual(res.piece.frozen, true);
+  assert.strictEqual(res.piece.rotOrig, 5);
+});
+
+test('applyRotation: null when there is no session and no item', () => {
+  assert.strictEqual(G.applyRotation({ shapeId: 5, icon: 3 }, 0), null);
+});
+
+test('applyRotation: mid-session spin is free and keeps the flags', () => {
+  /* L4 orbit has period 4: a spin that is not back to the origin stays free. */
+  const start = 16;
+  const next = G.ROTATION_MAP[start];
+  const piece = { shapeId: next, icon: 1, rotFree: true, rotOrig: start };
+  const res = G.applyRotation(piece, 1);
+  assert.strictEqual(res.kind, 'free');
+  assert.strictEqual(res.rotateCount, 1, 'free spin costs nothing');
+  assert.strictEqual(res.piece.shapeId, G.ROTATION_MAP[next]);
+  assert.strictEqual(res.piece.rotFree, true);
+  assert.strictEqual(res.piece.rotOrig, start, 'origin remembered across spins');
+});
+
+test('applyRotation: spinning back to the origin cancels and refunds', () => {
+  /* Line3-H period 2: one spin then a spin back to shapeId 5 (the origin). */
+  const piece = { shapeId: 6, icon: 3, rotFree: true, rotOrig: 5 };
+  const res = G.applyRotation(piece, 1);
+  assert.strictEqual(res.kind, 'canceled');
+  assert.strictEqual(res.rotateCount, 2, 'the rotate comes back');
+  assert.strictEqual(res.refunded, true);
+  assert.deepStrictEqual(res.piece, { shapeId: 5, icon: 3 }, 'flags stripped');
+});
+
+test('applyRotation: cancel refund clamps at the cap (refunded flag false)', () => {
+  const piece = { shapeId: 6, icon: 3, rotFree: true, rotOrig: 5 };
+  const res = G.applyRotation(piece, G.ITEM_CAPS.rotate);
+  assert.strictEqual(res.kind, 'canceled');
+  assert.strictEqual(res.rotateCount, G.ITEM_CAPS.rotate, 'stays at cap');
+  assert.strictEqual(res.refunded, false, 'nothing actually returned');
+});
+
+test('applyRotation: cancel preserves a frozen flag on the rebuilt piece', () => {
+  const piece = { shapeId: 6, icon: 3, rotFree: true, rotOrig: 5, frozen: true };
+  const res = G.applyRotation(piece, 0);
+  assert.strictEqual(res.kind, 'canceled');
+  assert.strictEqual(res.piece.frozen, true);
+  assert.strictEqual(res.piece.rotFree, undefined);
+  assert.strictEqual(res.piece.rotOrig, undefined);
+});
+
+test('applyRotation: legacy piece (rotFree, no rotOrig) never cancels', () => {
+  /* A Line3 spun on an old save: it stays free forever, matching what was paid. */
+  let piece = { shapeId: 5, icon: 3, rotFree: true };
+  for (let i = 0; i < 4; i++) {
+    const res = G.applyRotation(piece, 1);
+    assert.strictEqual(res.kind, 'free', 'never reaches cancel without rotOrig');
+    piece = res.piece;
+  }
+  assert.strictEqual(piece.shapeId, 5, 'back to the start shape but still free');
+});
+
+/* ---- Streak bonus ---- */
+
+test('streakBonus: 25 * (k-1) ladder, zero below 2', () => {
+  assert.strictEqual(G.streakBonus(0), 0);
+  assert.strictEqual(G.streakBonus(1), 0);
+  assert.strictEqual(G.streakBonus(2), 25);
+  assert.strictEqual(G.streakBonus(3), 50);
+  assert.strictEqual(G.streakBonus(4), 75);
+  assert.strictEqual(G.streakBonus(10), 225);
+});
+
+test('save round-trip preserves a streak of 4', () => {
+  const empty = new Array(81).fill(-1);
+  const game = G.encodeGame({
+    board: G.emptyBoard(),
+    tray: [{ shapeId: 0, icon: 1 }, null, null],
+    score: 80, inv: { rotate: 0, undo: 0, freeze: 0 },
+    progress: { pts: 0, combos: 0 },
+    frozen: new Uint8Array(81), freezeHold: false, streak: 4,
+  });
+  const decoded = G.validateSave({ v: 2, best: 1, game });
+  assert.strictEqual(decoded.game.streak, 4);
+});
+
+test('validateSave: v1 game defaults streak to 0', () => {
+  const goodBoard = new Array(81).fill(-1);
+  goodBoard[0] = 1;
+  const out = G.validateSave({ v: 1, best: 1, game: { board: goodBoard, tray: [{ shapeId: 0, icon: 1 }, null, null], score: 9 } });
+  assert.strictEqual(out.game.streak, 0, 'absent streak defaults to 0');
+});
+
+test('validateSave: hostile streak values fall back to 0', () => {
+  const filled = new Array(81).fill(1);
+  const mk = (streak) => G.validateSave({
+    v: 2, best: 1,
+    game: { board: filled.slice(), tray: [{ shapeId: 0, icon: 1 }, null, null], score: 5, streak },
+  }).game.streak;
+  assert.strictEqual(mk(-1), 0, 'negative rejected');
+  assert.strictEqual(mk(3.5), 0, 'fractional rejected');
+  assert.strictEqual(mk('7'), 0, 'string rejected');
+  assert.strictEqual(mk(1e9), 0, 'huge rejected');
+  assert.strictEqual(mk(4), 4, 'a sane streak survives');
+});
+
+test('takeSnapshot deep-copies the streak', () => {
+  const state = {
+    board: G.emptyBoard(), tray: [null, null, null], score: 0,
+    inv: { rotate: 0, undo: 0, freeze: 0 }, progress: { pts: 0, combos: 0 },
+    frozen: new Uint8Array(81), freezeHold: false, streak: 3,
+  };
+  const snap = G.takeSnapshot(state);
+  state.streak = 0;
+  assert.strictEqual(snap.streak, 3);
 });
 
 /* ---- Item economy ---- */

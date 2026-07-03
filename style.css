@@ -232,15 +232,23 @@ header { text-align: center; height: 56px; flex: none; }
 .best-pill { font-size: 16px; color: var(--text-soft); }
 .best-pill .crown { font-family: var(--font-emoji); }
 
-.combo-pill {
+.streak-pill {
   min-width: 56px;
   font-size: 16px;
-  color: #D9368F;
+  font-weight: 700;
+  color: #E8722C;
   opacity: 0;
   transform: scale(0.8);
   transition: opacity 200ms ease, transform 200ms ease;
 }
-.combo-pill.show { opacity: 1; transform: scale(1); }
+.streak-pill.show { opacity: 1; transform: scale(1); }
+.streak-pill .fire { font-family: var(--font-emoji); }
+.streak-pill.punch { animation: streak-punch 500ms ease; }
+@keyframes streak-punch {
+  0%   { transform: scale(1) rotate(0); }
+  40%  { transform: scale(1.3) rotate(-3deg); }
+  100% { transform: scale(1) rotate(0); }
+}
 
 #restartBtn, #muteBtn, #settingsBtn {
   width: 36px;
@@ -481,6 +489,8 @@ header { text-align: center; height: 56px; flex: none; }
   margin-top: 3px;
   padding-top: 3px;
 }
+.toast .t-row.streak { color: #E8722C; font-weight: 600; }
+:root[data-theme="dark"] .toast .t-row.streak { color: #FFA05C; }
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(-16px); }
@@ -505,24 +515,48 @@ header { text-align: center; height: 56px; flex: none; }
   transform: translate(-50%, -50%);
 }
 
-.fx-bubble { animation: fx-bubble 620ms ease-out var(--d, 0ms) both; }
+.fx-bubble { animation: fx-bubble 900ms ease-out var(--d, 0ms) both; }
 @keyframes fx-bubble {
   0%   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  60%  { opacity: 0.9; transform: translate(-50%, calc(-50% + var(--dy, -60px) * 0.7)) scale(1.35); }
+  60%  { opacity: 0.9; transform: translate(-50%, calc(-50% + var(--dy, -60px) * 0.7)) scale(1.5); }
   100% { opacity: 0; transform: translate(-50%, calc(-50% + var(--dy, -60px))) scale(0.4); }
 }
 
-.fx-burst { animation: fx-burst 650ms cubic-bezier(0.2, 0.6, 0.4, 1) var(--d, 0ms) both; }
+.fx-burst { animation: fx-burst 1000ms cubic-bezier(0.2, 0.6, 0.4, 1) var(--d, 0ms) both; }
 @keyframes fx-burst {
   0%   { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0); }
   100% { opacity: 0; transform: translate(calc(-50% + var(--dx, 40px)), calc(-50% + var(--dy, -40px))) scale(0.5) rotate(var(--spin, 180deg)); }
 }
 
-.fx-march { animation: fx-march 850ms ease-in var(--d, 0ms) both; }
+.fx-march { animation: fx-march 1250ms ease-in var(--d, 0ms) both; }
 @keyframes fx-march {
   0%   { opacity: 1; transform: translate(-50%, -50%); }
-  15%  { transform: translate(-50%, calc(-50% - 10px)); }
+  15%  { transform: translate(-50%, calc(-50% - 14px)); }
   100% { opacity: 0.9; transform: translate(var(--dx, 400px), -50%); }
+}
+
+.fx-big { font-size: calc(var(--cell) * 0.8); }
+
+/* Board shake (celebrations). On #boardWrap so the fx clones ride along but
+   the header and toasts stay put. */
+#boardWrap.shake-2 { animation: board-shake 260ms ease-in-out; }
+#boardWrap.shake-3 { animation: board-shake 380ms ease-in-out; }
+#boardWrap.shake-4 { animation: board-shake-big 550ms ease-in-out; }
+@keyframes board-shake {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(-5px, 3px); }
+  40% { transform: translate(5px, -3px); }
+  60% { transform: translate(-4px, 2px); }
+  80% { transform: translate(4px, -2px); }
+}
+@keyframes board-shake-big {
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  15% { transform: translate(-8px, 5px) rotate(-0.6deg); }
+  30% { transform: translate(8px, -5px) rotate(0.6deg); }
+  45% { transform: translate(-7px, 4px) rotate(-0.5deg); }
+  60% { transform: translate(7px, -4px) rotate(0.5deg); }
+  75% { transform: translate(-5px, 3px) rotate(-0.3deg); }
+  90% { transform: translate(5px, -3px) rotate(0.3deg); }
 }
 
 .particle {
@@ -703,9 +737,9 @@ header { text-align: center; height: 56px; flex: none; }
   will-change: transform;
 }
 #ghost .pcell .ic { font-size: calc(var(--cell) * 0.6); }
-#ghost.picked { animation: ghost-pick 120ms ease-out; }
+#ghost.picked { animation: ghost-pick 280ms cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
 @keyframes ghost-pick {
-  from { scale: 0.6; }
+  from { scale: 0.4; }
   to { scale: 1; }
 }
 #ghost.invalid { opacity: 0.5; filter: grayscale(60%); }
@@ -725,6 +759,20 @@ header { text-align: center; height: 56px; flex: none; }
   0% { opacity: 0; }
   30% { opacity: 1; }
   100% { opacity: 0; }
+}
+/* Gold celebration glow (tier 3 once, tier 4 a double pulse). */
+#glowPulse.pulse-gold, #glowPulse.pulse-gold-double {
+  box-shadow: inset 0 0 90px rgba(255, 194, 75, 0.6);
+}
+#glowPulse.pulse-gold { animation: glow 700ms ease-out; }
+#glowPulse.pulse-gold-double { animation: glow 450ms ease-out 2; }
+
+/* The score pill punches when a big clear lands. */
+.score-pill.punch { animation: score-punch 420ms ease; }
+@keyframes score-punch {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.22); }
+  100% { transform: scale(1); }
 }
 
 /* ---- Confetti ---- */
@@ -930,6 +978,7 @@ header { text-align: center; height: 56px; flex: none; }
 #nickInput:focus { outline: 2px solid #D9368F; }
 
 #scoreHelpBtn { margin: 4px 0 12px; }
+#settingsDone { margin-top: 14px; }
 
 /* ---- Scoring sheet ---- */
 
@@ -1070,6 +1119,7 @@ header { text-align: center; height: 56px; flex: none; }
   }
   .cell.frozen::after { animation: none; }
   .item-btn.armed { animation: none; }
+  #ghost.picked, #boardWrap.shake-2, #boardWrap.shake-3, #boardWrap.shake-4, .score-pill.punch, .streak-pill.punch { animation: none; }
 }
 @keyframes reduced-clear {
   to { opacity: 0; }

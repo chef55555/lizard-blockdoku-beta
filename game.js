@@ -161,6 +161,12 @@ function clearScore(n) {
   return n > 0 ? 18 * (2 * n - 1) : 0;
 }
 
+/* Streak: clearing something on back-to-back placements pays a rising bonus.
+   x2 +25, x3 +50, x4 +75... One tunable, chunky on purpose. */
+function streakBonus(k) {
+  return k >= 2 ? 25 * (k - 1) : 0;
+}
+
 /* Icon bonus per (unit, icon) pair, counted on the pre-clear snapshot.
    3-4 same: +10, 5-6: +25, 7-8: +50, 9: +100. Doubled for the lizard. */
 function iconBonusTier(count) {
@@ -273,6 +279,43 @@ const ROTATION_MAP = (() => {
   });
 })();
 
+/* Rotating a tray piece. Pure decision function: given the piece and the
+   current Rotate stock, it returns what tapping the arrow does, or null when
+   the tap can do nothing (no session and no item). One Rotate opens a free
+   spin session (rotFree) and remembers the pre-spin orientation (rotOrig);
+   spinning all the way back to that start cancels the session and refunds the
+   Rotate. Symmetric shapes never charge. Legacy pieces (rotFree without a
+   remembered rotOrig) keep spinning for free but can never cancel: that
+   matches what was already paid, so her live save keeps working. */
+function applyRotation(piece, rotateCount) {
+  const next = ROTATION_MAP[piece.shapeId];
+  /* A shape that maps to itself has no distinct orientation: spin visual only. */
+  if (next === piece.shapeId) {
+    return { kind: 'symmetric', rotateCount, piece };
+  }
+  if (piece.rotFree) {
+    /* Landing back on the remembered start cancels the session for a refund. */
+    if (piece.rotOrig !== undefined && next === piece.rotOrig) {
+      const rebuilt = { shapeId: next, icon: piece.icon };
+      if (piece.frozen) rebuilt.frozen = true;
+      const refunded = rotateCount < ITEM_CAPS.rotate;
+      return {
+        kind: 'canceled',
+        rotateCount: Math.min(ITEM_CAPS.rotate, rotateCount + 1),
+        piece: rebuilt,
+        refunded,
+      };
+    }
+    /* A plain mid-session spin: keep rotFree (and rotOrig, if present). */
+    return { kind: 'free', rotateCount, piece: { ...piece, shapeId: next } };
+  }
+  /* The first spin of this piece needs a Rotate in stock. */
+  if (rotateCount <= 0) return null;
+  const charged = { shapeId: next, icon: piece.icon, rotFree: true, rotOrig: piece.shapeId };
+  if (piece.frozen) charged.frozen = true;
+  return { kind: 'charged', rotateCount: rotateCount - 1, piece: charged };
+}
+
 /* One-level undo: deep snapshot of everything a turn can change. */
 function takeSnapshot(state) {
   return {
@@ -283,6 +326,7 @@ function takeSnapshot(state) {
     progress: { ...state.progress },
     frozen: new Uint8Array(state.frozen),
     freezeHold: !!state.freezeHold,
+    streak: state.streak,
   };
 }
 
@@ -373,6 +417,7 @@ function encodeGame(state) {
         icon: p.icon,
         ...(p.frozen ? { frozen: true } : {}),
         ...(p.rotFree ? { rotFree: true } : {}),
+        ...(p.rotFree && Number.isInteger(p.rotOrig) ? { rotOrig: p.rotOrig } : {}),
       }
       : null)),
     score: state.score,
@@ -380,6 +425,7 @@ function encodeGame(state) {
     progress: { ...state.progress },
     frozen: frozenMaskToList(state.frozen),
     freezeHold: !!state.freezeHold,
+    streak: state.streak || 0,
   };
 }
 
@@ -437,8 +483,29 @@ function validateSave(raw) {
       const piece = { shapeId: p.shapeId, icon: p.icon };
       if (p.frozen === true) piece.frozen = true;
       else if (p.frozen !== undefined && p.frozen !== false) throw new Error('bad frozen flag');
-      if (p.rotFree === true) piece.rotFree = true;
-      else if (p.rotFree !== undefined && p.rotFree !== false) throw new Error('bad rotFree flag');
+      if (p.rotFree === true) {
+        /* rotFree only means something on a shape that can actually rotate; on
+           a symmetric shape it is silently scrubbed (live-save migration). */
+        if (ROTATION_MAP[p.shapeId] !== p.shapeId) piece.rotFree = true;
+      } else if (p.rotFree !== undefined && p.rotFree !== false) {
+        throw new Error('bad rotFree flag');
+      }
+      /* rotOrig is the pre-session orientation remembered for cancel. Accept it
+         only alongside a live rotFree session, only as a real integer in this
+         piece's rotation orbit, and only a DIFFERENT orientation than now.
+         rotOrig without an active session is silently dropped. */
+      if (p.rotOrig !== undefined && piece.rotFree) {
+        if (!Number.isInteger(p.rotOrig) || p.rotOrig < 0 || p.rotOrig >= SHAPES.length) throw new Error('bad rotOrig');
+        if (p.rotOrig === p.shapeId) throw new Error('rotOrig equals shapeId');
+        let x = ROTATION_MAP[p.shapeId];
+        let inOrbit = false;
+        for (let k = 0; k < 4 && x !== p.shapeId; k++) {
+          if (x === p.rotOrig) { inOrbit = true; break; }
+          x = ROTATION_MAP[x];
+        }
+        if (!inOrbit) throw new Error('rotOrig out of orbit');
+        piece.rotOrig = p.rotOrig;
+      }
       return piece;
     });
     if (typeof g.score !== 'number' || !isFinite(g.score) || g.score < 0) return out;
@@ -470,7 +537,9 @@ function validateSave(raw) {
     const freezeHold = g.freezeHold === true;
     if (freezeHold && frozenMaskToList(frozen).length === 0) return out;
 
-    out.game = { board, tray, score: Math.floor(g.score), inv, progress, frozen, freezeHold };
+    const streak = clampInt(g.streak, 0, 999, 0);
+
+    out.game = { board, tray, score: Math.floor(g.score), inv, progress, frozen, freezeHold, streak };
     return out;
   } catch (e) {
     return out;
@@ -483,10 +552,10 @@ if (typeof module !== 'undefined' && module.exports) {
     ICONS, ICON_WEIGHTS, ICON_LABELS, LIZARD_ICON, SHAPES, SHAPE_CLASSES,
     N, CELL_COUNT,
     emptyBoard, canPlace, fitsSomewhere, placePiece,
-    scanUnits, unionCells, clearScore, iconBonusTier, iconBonuses,
+    scanUnits, unionCells, clearScore, streakBonus, iconBonusTier, iconBonuses,
     matchingSetsTier, matchingSetBonuses,
     ITEM_CAPS, computeEarned, grantItems,
-    rotateShapeCells, ROTATION_MAP, takeSnapshot,
+    rotateShapeCells, ROTATION_MAP, applyRotation, takeSnapshot,
     pickShapeId, pickIcon, makePiece, genTray, isGameOver,
     defaultMeta, frozenMaskToList, encodeGame, validateSave, sanitizeNickname,
   };
@@ -511,8 +580,16 @@ function initUI() {
   const GAMEOVER_DELAY = 600;
   const GHOST_LIFT = 70;          /* px the ghost floats above the finger */
   const GHOST_TAU = 50;           /* ms time constant of the ghost's easing */
+  /* At pickup the ghost eases slowly (trackable flight out of the slot) then
+     tightens: effective tau starts at GHOST_TAU + GHOST_TAU_BOOST and decays
+     toward GHOST_TAU with time constant GHOST_TAU_DECAY. */
+  const GHOST_TAU_BOOST = 90;
+  const GHOST_TAU_DECAY = 250;
   const BADGE_STAGGER = 120;
-  const MAX_PARTICLES = 24;
+  const MAX_PARTICLES = 36;
+  /* Celebration wait, fx clone cap, and impact all escalate with the tier. */
+  const CELEBRATE_WAIT = { 2: 750, 3: 950, 4: 1400 };
+  const FX_CAP = { 2: 30, 3: 42, 4: 54 };
 
   const COMBO_PHRASES = { 2: 'So cute!', 3: 'Gorgeous!', 4: 'Queen Lizard!' };
   const COMBO_LEGENDARY = 'LEGENDARY LIZARD!!';
@@ -536,6 +613,7 @@ function initUI() {
   let progress = { pts: 0, combos: 0 };
   let frozen = new Uint8Array(CELL_COUNT);
   let freezeHold = false;
+  let streak = 0;                 /* consecutive clearing placements */
   let meta = defaultMeta();       /* volume, theme, nickname, tutorial + item-help flags */
   let undoSnapshot = null;        /* one level, in-memory only; gone after reload */
   let tutorial = null;            /* { step, stash } while the tutorial runs */
@@ -561,7 +639,7 @@ function initUI() {
   const toastLayer = $('toastLayer');
   const scoreVal = $('scoreVal');
   const bestVal = $('bestVal');
-  const comboPill = $('comboPill');
+  const streakPill = $('streakPill');
   const splashEl = $('splash');
   const gameOverEl = $('gameOver');
   const confirmEl = $('confirmRestart');
@@ -649,6 +727,15 @@ function initUI() {
       fanfare: () => {
         [523, 659, 784, 1047].forEach((f, i) => note(f, i * 0.09, 0.2, 'triangle', 0.5));
         [659, 784, 1319].forEach((f) => note(f, 0.42, 0.55, 'triangle', 0.35));
+      },
+      impact: (tier) => {
+        note(160, 0, 0.22, 'sine', 0.7, 60);
+        note(80, 0.02, 0.35, 'triangle', 0.5, 50);
+        if (tier >= 3) note(55, 0.06, 0.5, 'sine', 0.65, 40);
+        if (tier >= 4) {
+          note(45, 0.12, 0.7, 'sine', 0.7, 34);
+          note(1568, 0.15, 0.4, 'sine', 0.22, 2093);
+        }
       },
     };
   })();
@@ -765,7 +852,10 @@ function initUI() {
       const piece = tray[i];
       if (!piece) return;
       slot.appendChild(buildPieceEl(piece, '--tray-cell'));
-      if (inv.rotate > 0 || piece.rotFree) slot.appendChild(buildRotBtn(i, piece.rotFree));
+      /* Symmetric shapes have nothing to rotate, so they never show the arrow. */
+      if ((inv.rotate > 0 || piece.rotFree) && ROTATION_MAP[piece.shapeId] !== piece.shapeId) {
+        slot.appendChild(buildRotBtn(i, piece.rotFree));
+      }
       if (!fitsSomewhere(board, SHAPES[piece.shapeId])) slot.classList.add('dead');
     });
   }
@@ -783,18 +873,29 @@ function initUI() {
     return b;
   }
 
-  /* One Rotate buys unlimited spins of that piece until it is placed;
-     the flag rides on the piece, so it survives saves and undo. */
+  /* One Rotate buys unlimited spins of that piece until it is placed; spinning
+     it all the way back to the start cancels the session and refunds the item.
+     The flags ride on the piece, so they survive saves and undo. */
   function rotateSlot(i) {
     if (state !== 'IDLE') return;
     const piece = tray[i];
     if (!piece) return;
-    if (!piece.rotFree) {
-      if (inv.rotate <= 0) return;
-      inv.rotate--;
-    }
-    tray[i] = { ...piece, shapeId: ROTATION_MAP[piece.shapeId], rotFree: true };
+    const res = applyRotation(piece, inv.rotate);
+    if (!res) return;
     sound.rotate();
+    if (res.kind === 'symmetric') {
+      /* Nothing to rotate; just a playful little spin, no state change. */
+      const el = slotEls[i].querySelector('.piece');
+      if (el && !reducedMotion) { el.classList.remove('spin'); void el.offsetWidth; el.classList.add('spin'); }
+      return;
+    }
+    inv.rotate = res.rotateCount;
+    tray[i] = res.piece;
+    if (res.kind === 'canceled') {
+      showToast('item-toast', res.refunded
+        ? '⟳ Back where it started, Rotate returned!'
+        : '⟳ Back where it started!');
+    }
     renderTray();
     updateItemsBar();
     const el = slotEls[i].querySelector('.piece');
@@ -825,6 +926,27 @@ function initUI() {
     bestVal.textContent = String(Math.max(best, score));
   }
 
+  /* The streak pill sits in the score row and stays lit while streak >= 2,
+     bouncing (punch) each time it climbs. Cleared below 2, it fades out. */
+  function updateStreakPill(punch) {
+    if (streak >= 2) {
+      streakPill.textContent = '';
+      const fire = document.createElement('span');
+      fire.className = 'fire';
+      fire.textContent = '\u{1F525}';
+      streakPill.append(fire, document.createTextNode(' x' + streak));
+      streakPill.classList.add('show');
+      if (punch && !reducedMotion) {
+        streakPill.classList.remove('punch');
+        void streakPill.offsetWidth;
+        streakPill.classList.add('punch');
+      }
+    } else {
+      streakPill.classList.remove('show', 'punch');
+      streakPill.textContent = '';
+    }
+  }
+
   const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 
   /* ---- Drag and drop ---- */
@@ -842,6 +964,7 @@ function initUI() {
     gx: 0,               /* eased ghost position; trails the finger target */
     gy: 0,
     lastT: 0,
+    startT: 0,           /* pickup timestamp; the ease loosens then tightens */
     startX: 0,
     startY: 0,
     moved: false,        /* a bare tap must never place a piece */
@@ -906,6 +1029,9 @@ function initUI() {
     drag.ghostH = drag.shape.h * cellPx;
     ghostEl.hidden = false;
     ghostEl.classList.remove('invalid');
+    /* Retrigger the pop even if a snapback of this ghost is still animating. */
+    ghostEl.classList.remove('picked');
+    void ghostEl.offsetWidth;
     ghostEl.classList.add('picked');
     slotEls[slot].classList.add('lifted');
 
@@ -915,6 +1041,7 @@ function initUI() {
     drag.gx = seedRect.left + seedRect.width / 2 - drag.ghostW / 2;
     drag.gy = seedRect.top + seedRect.height / 2 - drag.ghostH / 2;
     drag.lastT = performance.now();
+    drag.startT = drag.lastT;
     ghostEl.style.transform = 'translate3d(' + drag.gx + 'px,' + drag.gy + 'px,0)';
     updateTarget();
     drag.raf = requestAnimationFrame(dragLoop);
@@ -927,7 +1054,10 @@ function initUI() {
     const dt = Math.min(32, now - (drag.lastT || now));
     drag.lastT = now;
     const { x, y } = ghostTargetPos();
-    const k = 1 - Math.exp(-dt / GHOST_TAU);
+    const tau = reducedMotion
+      ? GHOST_TAU
+      : GHOST_TAU + GHOST_TAU_BOOST * Math.exp(-(now - drag.startT) / GHOST_TAU_DECAY);
+    const k = 1 - Math.exp(-dt / tau);
     drag.gx += (x - drag.gx) * k;
     drag.gy += (y - drag.gy) * k;
     ghostEl.style.transform = 'translate3d(' + drag.gx + 'px,' + drag.gy + 'px,0)';
@@ -1056,7 +1186,7 @@ function initUI() {
   async function resolveTurn(slotIdx, row, col) {
     state = 'RESOLVING';
     /* Everything a turn can change, captured before any mutation */
-    undoSnapshot = takeSnapshot({ board, tray, score, inv, progress, frozen, freezeHold });
+    undoSnapshot = takeSnapshot({ board, tray, score, inv, progress, frozen, freezeHold, streak });
     const piece = tray[slotIdx];
     const shape = SHAPES[piece.shapeId];
     const dipped = !!piece.frozen;
@@ -1088,21 +1218,31 @@ function initUI() {
     const bonusCells = new Set();
     for (const b of bonuses) for (const idx of b.cells) bonusCells.add(idx);
 
-    /* 3. Freeze, or clear the union and apply all scoring */
+    /* 3. Freeze, or clear the union and apply all scoring.
+       Streak: a frozen set keeps the streak warm (unchanged); a real clear
+       extends it and pays the rising bonus; a placement that clears nothing
+       cools it back to zero. */
     let gained;
+    let streakPts = 0;
     if (didFreeze) {
       for (const idx of union) frozen[idx] = 1;
       freezeHold = true;
       gained = shape.cells.length;
-    } else {
+    } else if (n > 0) {
       for (const idx of union) board[idx] = -1;
-      if (n > 0 && freezeHold) { /* the melt rode along with this scan */
+      if (freezeHold) { /* the melt rode along with this scan */
         frozen = new Uint8Array(CELL_COUNT);
         freezeHold = false;
       }
+      streak++;
+      streakPts = streakBonus(streak);
       gained = shape.cells.length + clearScore(n)
         + bonuses.reduce((a, b) => a + b.points, 0)
-        + msBonuses.reduce((a, b) => a + b.points, 0);
+        + msBonuses.reduce((a, b) => a + b.points, 0)
+        + streakPts;
+    } else {
+      streak = 0;
+      gained = shape.cells.length;
     }
     score += gained;
     /* Bank the record immediately so a mid-game restart can never lose it. */
@@ -1172,7 +1312,8 @@ function initUI() {
       await wait(POP_MS + placedRender.length * POP_STAGGER);
       renderBoard(); /* paints the icy cells from the mask */
     } else if (n > 0) {
-      showScoreToast(n, shape.cells.length, bonuses, msBonuses, gained);
+      showScoreToast(n, shape.cells.length, bonuses, msBonuses, gained, streak, streakPts);
+      updateStreakPill(true);
       if (bonuses.length) {
         sound.bonus(bonuses.some((b) => b.icon === LIZARD_ICON));
         if (!reducedMotion) {
@@ -1194,11 +1335,14 @@ function initUI() {
         spawnParticles(union);
         await wait(reducedMotion ? 160 : CLEAR_WAIT);
       } else {
+        sound.impact(tier);
         celebrate(tier, unionRender);
-        await wait(tier === 2 ? 550 : tier === 3 ? 650 : 900);
+        spawnParticles(union);
+        await wait(CELEBRATE_WAIT[tier]);
       }
       renderBoard();
     } else {
+      updateStreakPill(false);
       await wait(POP_MS + placedRender.length * POP_STAGGER);
       for (const idx of placedIdx) {
         cellEls[idx].classList.remove('pop');
@@ -1266,9 +1410,26 @@ function initUI() {
     return 1;
   }
 
-  /* Tier 2+: the real cells fade fast while up to 30 lightweight clones
-     (transform/opacity only) carry the show. Cleanup on animationend plus
-     a safety sweep in case animations never fire. */
+  /* A single shared glow layer with one owning timer, so a pink lizard pulse
+     can never clip a gold celebration glow (or vice versa) mid-flight. */
+  let glowTimer = 0;
+  function pulseGlow(cls, ms) {
+    if (reducedMotion) return;
+    clearTimeout(glowTimer);
+    glowEl.className = '';
+    void glowEl.offsetWidth;
+    glowEl.hidden = false;
+    glowEl.classList.add(cls);
+    glowTimer = setTimeout(() => {
+      glowEl.classList.remove(cls);
+      glowEl.hidden = true;
+    }, ms);
+  }
+
+  /* Tier 2+: the real cells fade fast while lightweight clones (transform and
+     opacity only) carry the show, and the whole board shakes, the score pill
+     punches, and a gold glow pulses. Cleanup on animationend plus a safety
+     sweep in case animations never fire. */
   function celebrate(tier, unionRender) {
     const fxHost = $('fxLayer');
     const boardW = cellPx * N;
@@ -1277,7 +1438,7 @@ function initUI() {
       cell.classList.remove('flash', 'pop');
       cell.classList.add('fade-fast');
     }
-    const cap = Math.min(30, unionRender.length);
+    const cap = Math.min(FX_CAP[tier], unionRender.length);
     const step = unionRender.length / cap;
     for (let i = 0; i < cap; i++) {
       const { idx, icon } = unionRender[Math.floor(i * step)];
@@ -1289,25 +1450,51 @@ function initUI() {
       s.style.top = y + 'px';
       if (tier === 2) {
         s.className = 'fx-cell fx-bubble';
-        s.style.setProperty('--dy', -(50 + rng() * 70 | 0) + 'px');
-        s.style.setProperty('--d', (rng() * 160 | 0) + 'ms');
+        s.style.setProperty('--dy', -(70 + rng() * 100 | 0) + 'px');
+        s.style.setProperty('--d', (rng() * 200 | 0) + 'ms');
       } else if (tier === 3) {
         s.className = 'fx-cell fx-burst';
-        s.style.setProperty('--dx', ((rng() * 160 - 80) | 0) + 'px');
-        s.style.setProperty('--dy', ((rng() * 160 - 110) | 0) + 'px');
-        s.style.setProperty('--spin', ((rng() * 520 - 260) | 0) + 'deg');
-        s.style.setProperty('--d', (rng() * 120 | 0) + 'ms');
+        s.style.setProperty('--dx', ((rng() * 240 - 120) | 0) + 'px');
+        s.style.setProperty('--dy', ((rng() * 240 - 170) | 0) + 'px');
+        s.style.setProperty('--spin', ((rng() * 840 - 420) | 0) + 'deg');
+        s.style.setProperty('--d', (rng() * 140 | 0) + 'ms');
       } else {
-        s.className = 'fx-cell fx-march';
+        s.className = 'fx-cell fx-march fx-big';
         s.style.setProperty('--dx', ((boardW - x + 60) | 0) + 'px');
-        s.style.setProperty('--d', ((idx % N) * 28) + 'ms');
+        s.style.setProperty('--d', ((idx % 9) * 40) + 'ms');
       }
       s.addEventListener('animationend', () => s.remove());
       fxHost.appendChild(s);
     }
+
+    /* Board shake rides inside boardWrap, so the fx clones shake with it while
+       the header and toasts stay readable. The animationend guard ignores the
+       many child-cell animations that bubble up through boardWrap. */
+    boardWrap.classList.remove('shake-2', 'shake-3', 'shake-4');
+    void boardWrap.offsetWidth;
+    boardWrap.classList.add('shake-' + tier);
+    const clearShake = (e) => {
+      if (e.target !== boardWrap) return;
+      boardWrap.classList.remove('shake-2', 'shake-3', 'shake-4');
+      boardWrap.removeEventListener('animationend', clearShake);
+    };
+    boardWrap.addEventListener('animationend', clearShake);
+
+    const scorePill = document.querySelector('.score-pill');
+    if (scorePill) {
+      scorePill.classList.remove('punch');
+      void scorePill.offsetWidth;
+      scorePill.classList.add('punch');
+      const clearPunch = () => { scorePill.classList.remove('punch'); scorePill.removeEventListener('animationend', clearPunch); };
+      scorePill.addEventListener('animationend', clearPunch);
+    }
+
+    if (tier === 3) pulseGlow('pulse-gold', 750);
+    if (tier === 4) { pulseGlow('pulse-gold-double', 950); confetti(); }
+
     setTimeout(() => {
       fxHost.querySelectorAll('.fx-cell').forEach((el) => el.remove());
-    }, 1500);
+    }, 2600);
   }
 
   function spawnParticles(union) {
@@ -1333,7 +1520,7 @@ function initUI() {
 
   /* ---- Toasts: slow notifications that float off the top; tap to dismiss ---- */
   const MAX_TOASTS = 3;
-  const TOAST_HOLD = 1800;
+  const TOAST_HOLD = 3600;
 
   function dismissToast(t, fast) {
     if (t.dataset.leaving) return;
@@ -1362,7 +1549,7 @@ function initUI() {
   }
 
   /* The per-clear score breakdown. Tapping it will open the scoring sheet. */
-  function showScoreToast(n, placementPts, bonuses, msBonuses, total) {
+  function showScoreToast(n, placementPts, bonuses, msBonuses, total, streakK, streakPts) {
     const box = document.createElement('div');
     const row = (label, pts, cls) => {
       const r = document.createElement('div');
@@ -1380,9 +1567,6 @@ function initUI() {
       head.className = 't-head';
       head.textContent = 'Combo x' + n + '! ' + (n >= 5 ? COMBO_LEGENDARY : COMBO_PHRASES[n]);
       box.appendChild(head);
-      comboPill.textContent = 'x' + n + '!';
-      comboPill.classList.add('show');
-      setTimeout(() => comboPill.classList.remove('show'), 1100);
     }
     row('Placement', placementPts);
     row('Clear x' + n, clearScore(n));
@@ -1396,13 +1580,10 @@ function initUI() {
       row(ICONS[ms.icon] + ' Matching Sets x' + ms.unitCount, ms.points);
       if (ms.icon === LIZARD_ICON) lizardHit = true;
     }
+    if (streakPts > 0) row('\u{1F525} Streak x' + streakK + '!', streakPts, 'streak');
     row('Total', total, 'total');
-    if (lizardHit && !reducedMotion) {
-      glowEl.hidden = false;
-      glowEl.classList.add('pulse');
-      setTimeout(() => { glowEl.classList.remove('pulse'); glowEl.hidden = true; }, 520);
-    }
-    showToast('score-toast', box, { ttl: 2400, onTap: openScoreHelp });
+    if (lizardHit && !reducedMotion) pulseGlow('pulse', 520);
+    showToast('score-toast', box, { ttl: 4800, onTap: openScoreHelp });
   }
 
   /* ---- Scoring sheet (also opened by tapping any score toast) ---- */
@@ -1415,7 +1596,7 @@ function initUI() {
   const ITEM_INFO = {
     rotate: {
       icon: '\u{1F504}', article: 'a', name: 'Rotate',
-      text: 'Tap the little ⟳ arrow on a tray piece to spin it. One Rotate covers that piece until you place it, so spin away! You earn one for every 200 points.',
+      text: 'Tap the little ⟳ arrow on a tray piece to spin it. One Rotate covers that piece until you place it, so spin away! You earn one for every 200 points. Spin it back to how it started and the Rotate hops right back into your pocket!',
     },
     undo: {
       icon: '↩️', article: 'an', name: 'Undo',
@@ -1499,6 +1680,7 @@ function initUI() {
     progress = snap.progress;
     frozen = snap.frozen;
     freezeHold = snap.freezeHold;
+    streak = snap.streak;
     inv.undo = Math.max(0, inv.undo - 1);
     if (state === 'GAME_OVER') {
       gameOverEl.classList.remove('show');
@@ -1510,6 +1692,7 @@ function initUI() {
     renderTray();
     updateItemsBar();
     updateScoreDisplay(true);
+    updateStreakPill(false);
     persist();
     showToast('item-toast', '↩️ Move undone');
   }
@@ -1639,7 +1822,7 @@ function initUI() {
     if (tutorial || state !== 'IDLE') return;
     tutorial = {
       step: -1,
-      stash: { board, tray, score, best, inv, progress, frozen, freezeHold, undoSnapshot },
+      stash: { board, tray, score, best, inv, progress, frozen, freezeHold, streak, undoSnapshot },
     };
     score = 0;
     undoSnapshot = null;
@@ -1661,6 +1844,7 @@ function initUI() {
     progress = s.progress;
     frozen = s.frozen;
     freezeHold = s.freezeHold;
+    streak = s.streak;
     undoSnapshot = s.undoSnapshot;
     meta.seenTutorial = true;
     coachEl.hidden = true;
@@ -1669,6 +1853,7 @@ function initUI() {
     renderTray();
     updateItemsBar();
     updateScoreDisplay(true);
+    updateStreakPill(false);
     state = 'IDLE';
     persist();
   }
@@ -1685,6 +1870,7 @@ function initUI() {
     progress = { pts: 0, combos: 0 };
     frozen = new Uint8Array(CELL_COUNT);
     freezeHold = false;
+    streak = 0;
     s.setup();
     renderBoard();
     renderTray();
@@ -1920,6 +2106,7 @@ function initUI() {
     renderTray();
     updateItemsBar();
     updateScoreDisplay(true);
+    updateStreakPill(false);
     persist();
     gameOverEl.classList.remove('show');
     gameOverEl.hidden = true;
@@ -2032,7 +2219,7 @@ function initUI() {
       meta.best = best;
       meta.muted = sound.isMuted();
       const over = state === 'GAME_OVER' || isGameOver(board, tray);
-      const game = over ? null : encodeGame({ board, tray, score, inv, progress, frozen, freezeHold });
+      const game = over ? null : encodeGame({ board, tray, score, inv, progress, frozen, freezeHold, streak });
       localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 2, ...meta, game }));
     } catch (err) { /* storage may be unavailable; play on */ }
   }
@@ -2044,6 +2231,7 @@ function initUI() {
     progress = { pts: 0, combos: 0 };
     frozen = new Uint8Array(CELL_COUNT);
     freezeHold = false;
+    streak = 0;
     tray = genTray(board, rng);
   }
 
@@ -2064,6 +2252,7 @@ function initUI() {
       progress = game.progress;
       frozen = game.frozen;
       freezeHold = game.freezeHold;
+      streak = game.streak;
       if (tray.every((p) => p === null)) tray = genTray(board, rng);
     } else {
       freshGameState();
@@ -2116,5 +2305,6 @@ function initUI() {
   renderTray();
   updateItemsBar();
   updateScoreDisplay(true);
+  updateStreakPill(false);
   updateMuteBtn();
 }

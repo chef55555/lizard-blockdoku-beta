@@ -24,7 +24,7 @@
 
     <div id="scoreRow">
       <div class="pill score-pill"><span id="scoreVal">0</span></div>
-      <div class="pill combo-pill" id="comboPill"></div>
+      <div class="pill streak-pill" id="streakPill"></div>
       <div class="pill best-pill"><span class="crown">&#x1F451;</span> <span id="bestVal">0</span></div>
       <button id="muteBtn" type="button" aria-label="Mute sounds">&#x1F50A;</button>
       <button id="restartBtn" type="button" aria-label="Start over">&#x21BB;</button>
@@ -180,16 +180,22 @@
           <b>Lizard power</b><span>&#x1F98E; bonuses always count double</span>
           <em class="ex">3 lizards pay +20, and a perfect lizard set pays +200</em>
         </div>
+        <div class="help-item">
+          <b>&#x1F525; Streak</b><span>clear something on back-to-back placements: x2 +25, x3 +50, x4 +75...</span>
+          <em class="ex">Clear on three placements in a row: the second pays +25 and the third +50 on top of everything else; a placement that clears nothing cools the streak, and a frozen set keeps it warm until the melt</em>
+        </div>
         <h3>Earning items</h3>
         <div class="help-item">
           <b>&#x1F504; Rotate</b><span>one for every 200 points you score</span>
-          <em class="ex">One Rotate spins that piece as many times as you like until you place it</em>
+          <em class="ex">One Rotate spins that piece as many times as you like until you place it. Spin it back to the start and the Rotate returns to your pocket</em>
         </div>
         <div class="help-item">
           <b>&#x21A9;&#xFE0F; Undo</b><span>one for every 2nd combo (x2 or bigger)</span>
+          <em class="ex">Two x2 combos in one game = one Undo; it even works on the game-over screen</em>
         </div>
         <div class="help-item">
           <b>&#x2744;&#xFE0F; Freeze</b><span>one for every Perfect Match, plus one extra for x3+ combos</span>
+          <em class="ex">A box of 9 matching icons earns one instantly; dip a piece, freeze a row, and melt it into next turn's clear for a combo</em>
         </div>
         <div class="help-item">
           <em class="ex">You can hold at most 3 of each; extras are lost, so spend them!</em>

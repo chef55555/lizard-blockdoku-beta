@@ -62,7 +62,7 @@ async function dragPiece(slotIndex, row, col) {
   const box = await slot.boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
-  await page.waitForTimeout(160); // let the pick-up scale animation settle
+  await page.waitForTimeout(350); // let the pick-up pop-out settle before measuring the ghost
   const ghostBox = await page.locator('#ghost .piece').boundingBox();
   const px = boardLeft + col * cell + ghostBox.width / 2;
   const py = boardTop + row * cell + ghostBox.height + 70;
@@ -241,49 +241,71 @@ check('scoring sheet opens from settings', (await page.locator('#scoreHelp:not([
   const sheetText = await page.locator('#scoreHelp .help-body').textContent();
   check('sheet explains item earning', sheetText.includes('Rotate') && sheetText.includes('every 200 points')
     && sheetText.includes('Undo') && sheetText.includes('Freeze'));
-  check('sheet gives scoring examples', (await page.locator('#scoreHelp .ex').count()) >= 7);
+  check('sheet gives scoring examples', (await page.locator('#scoreHelp .ex').count()) >= 10);
 }
 await page.tap('#scoreHelpClose');
 await page.tap('#settingsDone');
 await page.waitForTimeout(100);
 
-console.log('7d. Items: rotate from the tray');
-// Line2-H (shape 1) must rotate to Line2-V (shape 2); two rotates held.
+console.log('7d. Items: rotate charges, cancels with a refund, and spins full circle');
+// Slot 0 L4 (shape 16, period 4), slot 1 Line3-H (shape 5, period 2),
+// slot 2 Square (shape 13, symmetric). Two rotates held.
 {
   const board = new Array(81).fill(-1);
   await injectSave({
     v: 2, best: 5,
     game: {
-      board, tray: [{ shapeId: 1, icon: 2 }, { shapeId: 0, icon: 3 }, { shapeId: 0, icon: 4 }],
+      board, tray: [{ shapeId: 16, icon: 2 }, { shapeId: 5, icon: 3 }, { shapeId: 13, icon: 4 }],
       score: 0, inv: { rotate: 2, undo: 0, freeze: 0 }, progress: { pts: 0, combos: 0 },
     },
   });
 }
-check('rotate count badge shows 2', (await page.locator('#itemRotate .cnt').textContent()) === '2');
-check('every filled slot offers a rotate button', (await page.locator('.slot .rot-btn').count()) === 3);
-const beforeRot = await page.locator('.slot').nth(0).locator('.piece').boundingBox();
-await page.locator('.slot').nth(0).locator('.rot-btn').tap();
-await page.waitForTimeout(300);
-const afterRot = await page.locator('.slot').nth(0).locator('.piece').boundingBox();
-check('piece turned from wide to tall', beforeRot.width > beforeRot.height && afterRot.height > afterRot.width,
-  JSON.stringify({ beforeRot, afterRot }));
-check('rotate did not place anything', (await filledCount()) === 0);
-check('one rotate consumed', (await page.locator('#itemRotate .cnt').textContent()) === '1');
-check('bar icon spins while a piece has free spins', (await page.locator('#itemRotate.spinning').count()) === 1);
-check('rotated piece gets the free rotate style', (await page.locator('.slot').nth(0).locator('.rot-btn.free').count()) === 1);
-const savedShape = await page.evaluate(() => JSON.parse(localStorage.getItem('lizard-blockdoku-v1')).game.tray[0].shapeId);
-check('rotation persisted to the save', savedShape === 2, 'shapeId=' + savedShape);
-await page.locator('.slot').nth(0).locator('.rot-btn').tap();
-await page.waitForTimeout(300);
-check('re-rotating the same piece is free', (await page.locator('#itemRotate .cnt').textContent()) === '1');
-const savedAgain = await page.evaluate(() => JSON.parse(localStorage.getItem('lizard-blockdoku-v1')).game.tray[0]);
-check('free spin persisted with the piece', savedAgain.shapeId === 1 && savedAgain.rotFree === true,
-  JSON.stringify(savedAgain));
+const rotCnt = () => page.locator('#itemRotate .cnt').textContent();
+const savedPiece = (slot) => page.evaluate((s) =>
+  JSON.parse(localStorage.getItem('lizard-blockdoku-v1')).game.tray[s], slot);
+
+check('rotate count badge shows 2', (await rotCnt()) === '2');
+check('symmetric square shows no rotate button', (await page.locator('.slot .rot-btn').count()) === 2);
+
+// Slot 1 Line3-H: first tap charges one Rotate and opens a free spin session.
 await page.locator('.slot').nth(1).locator('.rot-btn').tap();
 await page.waitForTimeout(300);
-check('rotating a second piece costs the second item', (await page.locator('#itemRotate[disabled]').count()) === 1);
-check('free pieces keep their buttons at 0 stock', (await page.locator('.slot .rot-btn').count()) === 2
-  && (await page.locator('.slot .rot-btn.free').count()) === 2);
+check('charge spends one rotate', (await rotCnt()) === '1');
+check('charged piece shows the free-spin style', (await page.locator('.slot').nth(1).locator('.rot-btn.free').count()) === 1);
+check('bar icon spins during a free session', (await page.locator('#itemRotate.spinning').count()) === 1);
+{
+  const p = await savedPiece(1);
+  check('charge remembers the original orientation', p.rotFree === true && p.rotOrig === 5, JSON.stringify(p));
+}
+// Second tap on the period-2 piece spins back to the start: cancel + refund.
+await page.locator('.slot').nth(1).locator('.rot-btn').tap();
+await page.waitForTimeout(300);
+check('cancel refunds the rotate back to 2', (await rotCnt()) === '2');
+{
+  const p = await savedPiece(1);
+  check('cancel strips the spin flags', p.shapeId === 5 && p.rotFree === undefined && p.rotOrig === undefined, JSON.stringify(p));
+}
+check('spinner stops after cancel', (await page.locator('#itemRotate.spinning').count()) === 0);
+{
+  const t = await page.locator('.toast.item-toast').last().textContent();
+  check('cancel toast says the rotate came back', t.includes('Rotate returned'), t);
+}
+
+// Slot 0 L4 (period 4): spin a full circle back to the start, without
+// hardcoding the intermediate orientation ids (walk until it returns).
+const startShape = (await savedPiece(0)).shapeId;
+let orbitTaps = 0;
+do {
+  await page.locator('.slot').nth(0).locator('.rot-btn').tap();
+  await page.waitForTimeout(250);
+  orbitTaps++;
+} while ((await savedPiece(0)).shapeId !== startShape && orbitTaps < 8);
+check('L4 returned to its starting orientation', (await savedPiece(0)).shapeId === startShape, 'taps=' + orbitTaps);
+check('a full orbit ends back at 2 rotates', (await rotCnt()) === '2');
+// One more tap re-charges the session from the start.
+await page.locator('.slot').nth(0).locator('.rot-btn').tap();
+await page.waitForTimeout(250);
+check('re-charging after a full circle costs a rotate', (await rotCnt()) === '1');
 
 console.log('7e. Items: first-earn help card');
 // progress.pts 199: placing the single (+1 point) crosses 200 = 1 rotate.
@@ -405,7 +427,7 @@ const meltToast = await page.locator('.toast.score-toast').textContent();
 check('melt scores as a merged combo', meltToast.includes('Combo x2') && meltToast.includes('Clear x2'), meltToast);
 check('melt pays the matching sets bonus', meltToast.includes('Matching Sets'), meltToast);
 check('melt total is placement + clear + bonuses', meltToast.includes('Total+175'), meltToast);
-await page.waitForTimeout(800);
+await page.waitForTimeout(1400);
 check('merged melt cleared everything', (await filledCount()) === 0);
 check('score after merged melt', (await score()) === 176, 'score=' + (await score()));
 
@@ -477,6 +499,50 @@ await page.tap('#itemHelpOk');
 check('triple perfect scored 493', (await score()) === 493, 'score=' + (await score()));
 check('rotate stock from 493 points', (await page.locator('#itemRotate .cnt').textContent()) === '2');
 check('freeze stock capped at 3', (await page.locator('#itemFreeze .cnt').textContent()) === '3');
+
+console.log('7j2. Streak: back-to-back clears pay a rising bonus');
+// Rows 0 and 1 (cols 0-7) with mixed icons so no single icon reaches 3 in a
+// row (zero icon bonuses). Tray: three Single lizards. Each single completes
+// one row; two in a row builds a x2 streak worth +25.
+{
+  const board = new Array(81).fill(-1);
+  [1, 2, 3, 4, 1, 2, 3, 4].forEach((icon, c) => { board[c] = icon; });      // row 0
+  [2, 3, 4, 1, 2, 3, 4, 1].forEach((icon, c) => { board[9 + c] = icon; });   // row 1
+  await injectSave({
+    v: 2, best: 5,
+    game: {
+      board, tray: [{ shapeId: 0, icon: 0 }, { shapeId: 0, icon: 0 }, { shapeId: 0, icon: 0 }],
+      score: 0, inv: { rotate: 0, undo: 0, freeze: 0 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+const savedStreak = () => page.evaluate(() => JSON.parse(localStorage.getItem('lizard-blockdoku-v1')).game.streak);
+// First clear: the streak starts at 1, so no bonus and no pill yet.
+await dragPiece(0, 0, 8);
+await page.waitForTimeout(600);
+{
+  const t = await page.locator('.toast.score-toast').last().textContent();
+  check('first clear shows no streak row', !t.includes('Streak'), t);
+}
+check('streak pill hidden at x1', (await page.locator('#streakPill.show').count()) === 0);
+check('score 19 after the first clear', (await score()) === 19, 'score=' + (await score()));
+// Second back-to-back clear: streak x2 pays +25 (Total +44).
+await dragPiece(1, 1, 8);
+await page.waitForTimeout(600);
+{
+  const t = await page.locator('.toast.score-toast').last().textContent();
+  check('second clear shows the streak bonus', t.includes('Streak x2') && t.includes('Total+44'), t);
+}
+check('streak pill shows x2', (await page.locator('#streakPill.show').count()) === 1
+  && (await page.locator('#streakPill').textContent()).includes('x2'));
+check('streak persisted to the save', (await savedStreak()) === 2);
+check('score 63 after the streak clear', (await score()) === 63, 'score=' + (await score()));
+// A placement that clears nothing cools the streak back to 0.
+await dragPiece(2, 4, 4);
+await page.waitForTimeout(400);
+check('streak pill hidden after a cold placement', (await page.locator('#streakPill.show').count()) === 0);
+check('streak reset in the save', (await savedStreak()) === 0);
+check('score 64 after the cold placement', (await score()) === 64, 'score=' + (await score()));
 
 console.log('7k. Tutorial: full walkthrough via settings replay');
 const scoreBeforeTut = await score();
