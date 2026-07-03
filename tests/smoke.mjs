@@ -135,12 +135,16 @@ check('invalid drop returns piece to tray', (await page.locator('.slot').nth(1).
 // Single at (0,8) completes the row: +1 place, +18 clear, +10 flowers, +10 hearts.
 await dragPiece(0, 0, 8);
 await page.waitForTimeout(150);
-const badges = await page.locator('.badge').allTextContents();
-await page.waitForTimeout(900);
+const toastText = await page.locator('.toast.score-toast').textContent();
+check('score toast shows the breakdown', toastText.includes('Placement+1') && toastText.includes('Clear x1+18'), toastText);
+check('score toast lists both icon bonuses', (toastText.match(/\+10/g) || []).length === 2, toastText);
+check('score toast shows the total', toastText.includes('Total+39'), toastText);
+await page.tap('.toast.score-toast');
+await page.waitForTimeout(400);
+check('tapping dismisses the toast', (await page.locator('.toast').count()) === 0);
+await page.waitForTimeout(500);
 check('row cleared', (await filledCount()) === 0, 'filled=' + (await filledCount()));
 check('score 139 after clear with two icon bonuses', (await score()) === 139, 'score=' + (await score()));
-check('two bonus badges shown', badges.length === 2, JSON.stringify(badges));
-check('badges show +10', badges.every((b) => b.includes('+10')), JSON.stringify(badges));
 
 console.log('5. Game over with new best');
 // Holes at (r, r) and (r, (r+4) % 9): every row, column AND box keeps at

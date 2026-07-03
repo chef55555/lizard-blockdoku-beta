@@ -531,7 +531,7 @@ function initUI() {
   const scoreRowEl = $('scoreRow');
   const trayEl = $('tray');
   const ghostEl = $('ghost');
-  const fxCenter = $('fxCenter');
+  const toastLayer = $('toastLayer');
   const scoreVal = $('scoreVal');
   const bestVal = $('bestVal');
   const comboPill = $('comboPill');
@@ -590,7 +590,7 @@ function initUI() {
       isMuted: () => muted,
       setMuted: (m) => { muted = m; },
       toggle: () => { muted = !muted; },
-      pickup: () => note(520, 0, 0.09, 'triangle', 0.35, 760),
+      pickup: () => note(520, 0, 0.09, 'triangle', 0.5, 760),
       place: () => { note(300, 0, 0.1, 'triangle', 0.6, 190); note(900, 0, 0.035, 'sine', 0.2); },
       invalid: () => { note(220, 0, 0.09, 'square', 0.16, 180); note(170, 0.09, 0.13, 'square', 0.16, 140); },
       clear: (n) => {
@@ -1001,7 +1001,7 @@ function initUI() {
 
     void granted; /* consumed by the items bar UI in a later milestone */
     if (n > 0) {
-      showCallouts(n, bonuses, msBonuses);
+      showScoreToast(n, shape.cells.length, bonuses, msBonuses, gained);
       if (bonuses.length) {
         sound.bonus(bonuses.some((b) => b.icon === LIZARD_ICON));
         if (!reducedMotion) {
@@ -1081,44 +1081,82 @@ function initUI() {
     }
   }
 
-  function showCallouts(n, bonuses, msBonuses) {
-    fxCenter.textContent = '';
-    let delay = 0;
+  /* ---- Toasts: slow notifications that float off the top; tap to dismiss ---- */
+  const MAX_TOASTS = 3;
+  const TOAST_HOLD = 1800;
+
+  function dismissToast(t, fast) {
+    if (t.dataset.leaving) return;
+    t.dataset.leaving = '1';
+    clearTimeout(t._ttl);
+    t.classList.add(fast ? 'out-fast' : 'out');
+    const done = () => t.remove();
+    t.addEventListener('animationend', done, { once: true });
+    setTimeout(done, 700); /* safety if animations are disabled */
+  }
+
+  function showToast(cls, content, opts) {
+    const t = document.createElement('div');
+    t.className = 'toast ' + cls;
+    if (typeof content === 'string') t.textContent = content;
+    else t.appendChild(content);
+    t.addEventListener('pointerup', () => {
+      if (opts && opts.onTap) opts.onTap();
+      dismissToast(t, true);
+    });
+    const live = Array.from(toastLayer.children).filter((x) => !x.dataset.leaving);
+    if (live.length >= MAX_TOASTS) dismissToast(live[0], true);
+    toastLayer.appendChild(t);
+    t._ttl = setTimeout(() => dismissToast(t, false), (opts && opts.ttl) || TOAST_HOLD);
+    return t;
+  }
+
+  /* The per-clear score breakdown. Tapping it will open the scoring sheet. */
+  function showScoreToast(n, placementPts, bonuses, msBonuses, total) {
+    const box = document.createElement('div');
+    const row = (label, pts, cls) => {
+      const r = document.createElement('div');
+      r.className = 't-row' + (cls ? ' ' + cls : '');
+      const l = document.createElement('span');
+      l.textContent = label;
+      const p = document.createElement('span');
+      p.className = 'pts';
+      p.textContent = '+' + pts;
+      r.append(l, p);
+      box.appendChild(r);
+    };
     if (n >= 2) {
-      const phrase = n >= 5 ? COMBO_LEGENDARY : COMBO_PHRASES[n];
-      addCallout('combo-text', 'Combo x' + n + '! ' + phrase, delay);
-      delay += BADGE_STAGGER;
+      const head = document.createElement('div');
+      head.className = 't-head';
+      head.textContent = 'Combo x' + n + '! ' + (n >= 5 ? COMBO_LEGENDARY : COMBO_PHRASES[n]);
+      box.appendChild(head);
       comboPill.textContent = 'x' + n + '!';
       comboPill.classList.add('show');
       setTimeout(() => comboPill.classList.remove('show'), 1100);
     }
+    row('Placement', placementPts);
+    row('Clear x' + n, clearScore(n));
     let lizardHit = false;
     for (const b of bonuses) {
-      const label = b.perfect ? 'Perfect Match!' : ICON_LABELS[b.icon];
-      addCallout('badge', ICONS[b.icon] + ' ' + label + ' +' + b.points, delay);
-      delay += BADGE_STAGGER;
+      const label = b.perfect ? 'Perfect Match!' : ICON_LABELS[b.icon].replace('!', '');
+      row(ICONS[b.icon] + ' ' + label + ' x' + b.count, b.points);
       if (b.icon === LIZARD_ICON) lizardHit = true;
     }
-    for (const ms of (msBonuses || [])) {
-      addCallout('badge', ICONS[ms.icon] + ' Matching Sets x' + ms.unitCount + '! +' + ms.points, delay);
-      delay += BADGE_STAGGER;
+    for (const ms of msBonuses) {
+      row(ICONS[ms.icon] + ' Matching Sets x' + ms.unitCount, ms.points);
       if (ms.icon === LIZARD_ICON) lizardHit = true;
     }
+    row('Total', total, 'total');
     if (lizardHit && !reducedMotion) {
       glowEl.hidden = false;
       glowEl.classList.add('pulse');
       setTimeout(() => { glowEl.classList.remove('pulse'); glowEl.hidden = true; }, 520);
     }
+    showToast('score-toast', box, { ttl: 2400, onTap: openScoreHelp });
   }
 
-  function addCallout(cls, text, delay) {
-    const el = document.createElement('div');
-    el.className = cls;
-    el.textContent = text;
-    el.style.animationDelay = delay + 'ms';
-    el.addEventListener('animationend', () => el.remove());
-    fxCenter.appendChild(el);
-  }
+  /* Placeholder until the settings milestone ships the real sheet. */
+  let openScoreHelp = () => {};
 
   /* ---- Overlays ---- */
   function showGameOver(newBest) {
