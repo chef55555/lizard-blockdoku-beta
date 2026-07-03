@@ -236,6 +236,56 @@ await page.tap('#scoreHelpClose');
 await page.tap('#settingsDone');
 await page.waitForTimeout(100);
 
+console.log('7d. Items: rotate from the tray');
+// Line2-H (shape 1) must rotate to Line2-V (shape 2); two rotates held.
+{
+  const board = new Array(81).fill(-1);
+  await injectSave({
+    v: 2, best: 5,
+    game: {
+      board, tray: [{ shapeId: 1, icon: 2 }, { shapeId: 0, icon: 3 }, { shapeId: 0, icon: 4 }],
+      score: 0, inv: { rotate: 2, undo: 0, freeze: 0 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+check('rotate count badge shows 2', (await page.locator('#itemRotate .cnt').textContent()) === '2');
+check('every filled slot offers a rotate button', (await page.locator('.slot .rot-btn').count()) === 3);
+const beforeRot = await page.locator('.slot').nth(0).locator('.piece').boundingBox();
+await page.locator('.slot').nth(0).locator('.rot-btn').tap();
+await page.waitForTimeout(300);
+const afterRot = await page.locator('.slot').nth(0).locator('.piece').boundingBox();
+check('piece turned from wide to tall', beforeRot.width > beforeRot.height && afterRot.height > afterRot.width,
+  JSON.stringify({ beforeRot, afterRot }));
+check('rotate did not place anything', (await filledCount()) === 0);
+check('one rotate consumed', (await page.locator('#itemRotate .cnt').textContent()) === '1');
+const savedShape = await page.evaluate(() => JSON.parse(localStorage.getItem('lizard-blockdoku-v1')).game.tray[0].shapeId);
+check('rotation persisted to the save', savedShape === 2, 'shapeId=' + savedShape);
+await page.locator('.slot').nth(0).locator('.rot-btn').tap();
+await page.waitForTimeout(300);
+check('items bar disables at 0 rotates', (await page.locator('#itemRotate[disabled]').count()) === 1);
+check('slot rotate buttons vanish at 0', (await page.locator('.slot .rot-btn').count()) === 0);
+
+console.log('7e. Items: first-earn help card');
+// progress.pts 199: placing the single (+1 point) crosses 200 = 1 rotate.
+{
+  const board = new Array(81).fill(-1);
+  await injectSave({
+    v: 2, best: 5,
+    game: {
+      board, tray: [{ shapeId: 0, icon: 3 }, { shapeId: 0, icon: 4 }, { shapeId: 1, icon: 1 }],
+      score: 199, inv: { rotate: 0, undo: 0, freeze: 0 }, progress: { pts: 199, combos: 0 },
+    },
+  });
+}
+await dragPiece(0, 4, 4);
+await page.waitForSelector('#itemHelp:not([hidden])', { timeout: 4000 });
+check('first-earn help card appears', true);
+check('help card explains Rotate', (await page.locator('#itemHelpTitle').textContent()).includes('Rotate'));
+await page.tap('#itemHelpOk');
+await page.waitForTimeout(100);
+check('help card dismisses', (await page.locator('#itemHelp:not([hidden])').count()) === 0);
+check('earned rotate shows in the bar', (await page.locator('#itemRotate .cnt').textContent()) === '1');
+
 console.log('8. Landscape browser tab still fits');
 await page.setViewportSize({ width: 844, height: 390 });
 await page.reload();

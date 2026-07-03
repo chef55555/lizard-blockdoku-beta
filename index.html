@@ -41,6 +41,12 @@
       <div id="fxLayer"></div>
     </div>
 
+    <div id="itemsBar">
+      <button id="itemRotate" class="item-btn" type="button" aria-label="Rotate pieces" disabled>&#x1F504;<span class="cnt" hidden>0</span></button>
+      <button id="itemUndo" class="item-btn" type="button" aria-label="Undo last move" disabled>&#x21A9;&#xFE0F;<span class="cnt" hidden>0</span></button>
+      <button id="itemFreeze" class="item-btn" type="button" aria-label="Freeze" disabled>&#x2744;&#xFE0F;<span class="cnt" hidden>0</span></button>
+    </div>
+
     <div id="tray">
       <div class="slot" data-slot="0"></div>
       <div class="slot" data-slot="1"></div>
@@ -79,6 +85,15 @@
       <p class="sweet-line">Your current game will be lost</p>
       <button id="confirmYes" type="button" class="btn-main">Start over</button>
       <button id="confirmNo" type="button" class="btn-ghost">Keep playing</button>
+    </div>
+  </div>
+
+  <div id="itemHelp" class="overlay" hidden>
+    <div class="card">
+      <div id="itemHelpIcon" class="item-help-icon"></div>
+      <h2 id="itemHelpTitle"></h2>
+      <p id="itemHelpText" class="sweet-line"></p>
+      <button id="itemHelpOk" type="button" class="btn-main">Got it!</button>
     </div>
   </div>
 

@@ -470,6 +470,87 @@ header { text-align: center; height: 56px; flex: none; }
   100% { opacity: 0; transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% + var(--dy, -36px))); }
 }
 
+/* ---- Items bar ---- */
+
+#itemsBar {
+  height: 44px;
+  flex: none;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: center;
+}
+
+.item-btn {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--pill-border);
+  background: var(--pill-bg);
+  font-family: var(--font-emoji);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  flex: none;
+}
+.item-btn[disabled] { opacity: 0.35; cursor: default; }
+.item-btn:not([disabled]):active { transform: scale(0.92); }
+
+.item-btn .cnt {
+  position: absolute;
+  top: -4px;
+  right: -7px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--btn-grad);
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 4px;
+}
+
+.item-btn.bounce { animation: item-bounce 500ms ease; }
+@keyframes item-bounce {
+  0%, 100% { transform: scale(1); }
+  30% { transform: scale(1.28); }
+  60% { transform: scale(0.9); }
+}
+
+.item-help-icon {
+  font-size: 44px;
+  font-family: var(--font-emoji);
+  margin-bottom: 6px;
+}
+
+/* Per-slot rotate button (visible while rotates are held) */
+.rot-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--pill-border);
+  background: var(--pill-bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+  touch-action: none;
+}
+.rot-btn:active { transform: scale(0.9); }
+
+.piece.spin { animation: spin-in 220ms ease; }
+@keyframes spin-in {
+  from { transform: rotate(-90deg) scale(0.85); }
+  to   { transform: rotate(0) scale(1); }
+}
+
 /* ---- Tray ---- */
 
 #tray {
@@ -483,6 +564,7 @@ header { text-align: center; height: 56px; flex: none; }
 }
 
 .slot {
+  position: relative;
   flex: 1 1 0;
   background: var(--slot-bg);
   border-radius: 14px;
@@ -784,6 +866,7 @@ header { text-align: center; height: 56px; flex: none; }
 @media (prefers-reduced-motion: reduce) {
   #floaters span, .splash-mascot, .splash-tap, #title .mascot { animation: none; }
   .cell.pop { animation: none; }
+  .piece.spin, .item-btn.bounce { animation: none; }
   .toast { animation: none; }
   .toast.out, .toast.out-fast { animation: reduced-toast-out 200ms ease-out forwards; }
   .cell.clearing { animation: reduced-clear 150ms ease-out forwards; }
@@ -804,6 +887,9 @@ header { text-align: center; height: 56px; flex: none; }
 @media (max-height: 520px) {
   header { display: none; }
   #scoreRow { margin: 0; }
+  /* Too tight for the items bar; the board's 24px minimum cell would
+     otherwise push the tray off screen. Portrait has the full bar. */
+  #itemsBar { display: none; }
   #tray { height: 80px; }
   .bg-blob, #floaters { display: none; }
 }

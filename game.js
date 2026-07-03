@@ -541,6 +541,7 @@ function initUI() {
   const headerEl = document.querySelector('header');
   const scoreRowEl = $('scoreRow');
   const trayEl = $('tray');
+  const itemsBarEl = $('itemsBar');
   const ghostEl = $('ghost');
   const toastLayer = $('toastLayer');
   const scoreVal = $('scoreVal');
@@ -626,6 +627,7 @@ function initUI() {
         note(1319, 0.36, 0.5, 'triangle', 0.6);
       },
       tap: () => note(660, 0, 0.05, 'sine', 0.25),
+      rotate: () => { note(500, 0, 0.06, 'triangle', 0.4, 900); note(700, 0.05, 0.08, 'triangle', 0.35, 1100); },
     };
   })();
 
@@ -673,7 +675,7 @@ function initUI() {
     const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
     /* Size the board to the space the fixed chrome actually leaves, so
        short viewports (landscape browser tab) never clip the tray. */
-    const chromeH = headerEl.offsetHeight + scoreRowEl.offsetHeight + trayEl.offsetHeight + 44;
+    const chromeH = headerEl.offsetHeight + scoreRowEl.offsetHeight + itemsBarEl.offsetHeight + trayEl.offsetHeight + 44;
     cellPx = Math.max(24, Math.min(56, Math.floor(Math.min(vw - 16, vh - chromeH) / 9)));
     document.documentElement.style.setProperty('--cell', cellPx + 'px');
     const slotH = slotEls[0] ? slotEls[0].clientHeight : 110;
@@ -739,8 +741,36 @@ function initUI() {
       const piece = tray[i];
       if (!piece) return;
       slot.appendChild(buildPieceEl(piece, '--tray-cell'));
+      if (inv.rotate > 0) slot.appendChild(buildRotBtn(i));
       if (!fitsSomewhere(board, SHAPES[piece.shapeId])) slot.classList.add('dead');
     });
+  }
+
+  /* Per-slot rotate button. Its pointerdown never reaches the slot, so
+     tapping it can never begin a drag. */
+  function buildRotBtn(i) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rot-btn';
+    b.textContent = '⟳';
+    b.setAttribute('aria-label', 'Rotate this piece');
+    b.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); });
+    b.addEventListener('pointerup', (e) => { e.stopPropagation(); rotateSlot(i); });
+    return b;
+  }
+
+  function rotateSlot(i) {
+    if (state !== 'IDLE') return;
+    const piece = tray[i];
+    if (!piece || inv.rotate <= 0) return;
+    inv.rotate--;
+    tray[i] = { ...piece, shapeId: ROTATION_MAP[piece.shapeId] };
+    sound.rotate();
+    renderTray();
+    updateItemsBar();
+    const el = slotEls[i].querySelector('.piece');
+    if (el && !reducedMotion) el.classList.add('spin');
+    persist();
   }
 
   function updateScoreDisplay(instant) {
@@ -1031,7 +1061,6 @@ function initUI() {
     }
     updateScoreDisplay();
 
-    void granted; /* consumed by the items bar UI in a later milestone */
     if (n > 0) {
       showScoreToast(n, shape.cells.length, bonuses, msBonuses, gained);
       if (bonuses.length) {
@@ -1060,6 +1089,8 @@ function initUI() {
     }
 
     renderTray();
+    updateItemsBar();
+    announceEarned(granted);
     persist();
 
     if (over) {
@@ -1068,6 +1099,7 @@ function initUI() {
       showGameOver(newBest);
     } else {
       state = 'IDLE';
+      maybeShowItemHelp(granted);
     }
   }
 
@@ -1192,6 +1224,78 @@ function initUI() {
   function openScoreHelp() { scoreHelpEl.hidden = false; }
   $('scoreHelpClose').addEventListener('click', () => { sound.tap(); scoreHelpEl.hidden = true; });
 
+  /* ---- Items bar ---- */
+  const itemBtns = { rotate: $('itemRotate'), undo: $('itemUndo'), freeze: $('itemFreeze') };
+  const ITEM_INFO = {
+    rotate: {
+      icon: '\u{1F504}', article: 'a', name: 'Rotate',
+      text: 'Tap the little ⟳ arrow on a tray piece to spin it. You earn one for every 200 points!',
+    },
+    undo: {
+      icon: '↩️', article: 'an', name: 'Undo',
+      text: 'Takes back your whole last move. You earn one for every 2 combos!',
+    },
+    freeze: {
+      icon: '❄️', article: 'a', name: 'Freeze',
+      text: 'Dips a piece in ice: sets it finishes wait one turn and then clear together in a bigger combo. Earned with Perfect Matches and x3 combos!',
+    },
+  };
+
+  function updateItemsBar() {
+    for (const k of Object.keys(itemBtns)) {
+      const btn = itemBtns[k];
+      const cnt = btn.querySelector('.cnt');
+      cnt.textContent = String(inv[k]);
+      cnt.hidden = inv[k] === 0;
+      btn.disabled = inv[k] === 0;
+    }
+  }
+
+  function announceEarned(granted) {
+    for (const k of Object.keys(granted)) {
+      if (!granted[k]) continue;
+      const info = ITEM_INFO[k];
+      showToast('item-toast', info.icon + ' ' + info.name + ' earned!' + (granted[k] > 1 ? ' x' + granted[k] : ''));
+      const btn = itemBtns[k];
+      btn.classList.remove('bounce');
+      void btn.offsetWidth;
+      btn.classList.add('bounce');
+    }
+  }
+
+  /* First-earn mini tutorial, once ever per item. The flag is only set when
+     the card is actually SHOWN, so an earn during game over tries again. */
+  const itemHelpEl = $('itemHelp');
+  const helpQueue = [];
+  function maybeShowItemHelp(granted) {
+    for (const k of Object.keys(granted)) {
+      if (granted[k] && !meta.itemHelp[k] && !helpQueue.includes(k)) helpQueue.push(k);
+    }
+    showNextItemHelp();
+  }
+  function showNextItemHelp() {
+    if (!itemHelpEl.hidden) return;
+    const k = helpQueue.shift();
+    if (!k) return;
+    const info = ITEM_INFO[k];
+    $('itemHelpIcon').textContent = info.icon;
+    $('itemHelpTitle').textContent = 'You earned ' + info.article + ' ' + info.name + '!';
+    $('itemHelpText').textContent = info.text;
+    meta.itemHelp[k] = true;
+    persist();
+    itemHelpEl.hidden = false;
+  }
+  $('itemHelpOk').addEventListener('click', () => {
+    sound.tap();
+    itemHelpEl.hidden = true;
+    showNextItemHelp();
+  });
+
+  /* The bar's rotate button is inventory display; usage lives on the tray. */
+  itemBtns.rotate.addEventListener('click', () => {
+    if (inv.rotate > 0) showToast('item-toast', '⟳ Tap the little arrow on a tray piece to rotate it');
+  });
+
   /* ---- Overlays ---- */
   function showGameOver(newBest) {
     state = 'GAME_OVER';
@@ -1231,6 +1335,7 @@ function initUI() {
     freshGameState();
     renderBoard();
     renderTray();
+    updateItemsBar();
     updateScoreDisplay(true);
     persist();
     gameOverEl.classList.remove('show');
@@ -1423,6 +1528,7 @@ function initUI() {
   relayout();
   renderBoard();
   renderTray();
+  updateItemsBar();
   updateScoreDisplay(true);
   updateMuteBtn();
 }
