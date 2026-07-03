@@ -487,6 +487,7 @@ function initUI() {
   const SNAPBACK_MS = 150;
   const GAMEOVER_DELAY = 600;
   const GHOST_LIFT = 70;          /* px the ghost floats above the finger */
+  const GHOST_TAU = 50;           /* ms time constant of the ghost's easing */
   const BADGE_STAGGER = 120;
   const MAX_PARTICLES = 24;
 
@@ -762,6 +763,9 @@ function initUI() {
     ghostH: 0,
     px: 0,
     py: 0,
+    gx: 0,               /* eased ghost position; trails the finger target */
+    gy: 0,
+    lastT: 0,
     startX: 0,
     startY: 0,
     moved: false,        /* a bare tap must never place a piece */
@@ -773,7 +777,9 @@ function initUI() {
   };
   let snapTimer = 0;
 
-  function ghostPos() {
+  /* Where the ghost WANTS to be: centered on the finger, lifted above it.
+     All drop targeting derives from this, never from the lagging ghost. */
+  function ghostTargetPos() {
     return {
       x: drag.px - drag.ghostW / 2,
       y: drag.py - drag.ghostH - GHOST_LIFT,
@@ -821,26 +827,36 @@ function initUI() {
     ghostEl.classList.add('picked');
     slotEls[slot].classList.add('lifted');
 
-    applyGhostTransform();
+    /* Seed the follower at the tray slot so the piece flies OUT of it */
+    const pieceEl = slotEls[slot].querySelector('.piece');
+    const seedRect = (pieceEl || slotEls[slot]).getBoundingClientRect();
+    drag.gx = seedRect.left + seedRect.width / 2 - drag.ghostW / 2;
+    drag.gy = seedRect.top + seedRect.height / 2 - drag.ghostH / 2;
+    drag.lastT = performance.now();
+    ghostEl.style.transform = 'translate3d(' + drag.gx + 'px,' + drag.gy + 'px,0)';
     updateTarget();
     drag.raf = requestAnimationFrame(dragLoop);
   }
 
-  function dragLoop() {
+  /* Exponential follower: the ghost grows out of its tray slot and trails
+     the finger with a little weight (settles in ~150ms, never overshoots). */
+  function dragLoop(now) {
     if (!drag.active) return;
-    applyGhostTransform();
+    const dt = Math.min(32, now - (drag.lastT || now));
+    drag.lastT = now;
+    const { x, y } = ghostTargetPos();
+    const k = 1 - Math.exp(-dt / GHOST_TAU);
+    drag.gx += (x - drag.gx) * k;
+    drag.gy += (y - drag.gy) * k;
+    ghostEl.style.transform = 'translate3d(' + drag.gx + 'px,' + drag.gy + 'px,0)';
     updateTarget();
     drag.raf = requestAnimationFrame(dragLoop);
   }
 
-  function applyGhostTransform() {
-    const { x, y } = ghostPos();
-    ghostEl.style.transform = 'translate3d(' + x + 'px,' + y + 'px,0)';
-  }
-
-  /* All snapping math derives from the ghost, never from the finger. */
+  /* Snapping math derives from the ghost's TARGET (finger-derived), never
+     from the eased ghost itself, so fast flicks land where the finger said. */
   function updateTarget() {
-    const { x, y } = ghostPos();
+    const { x, y } = ghostTargetPos();
     const col = Math.floor((x + cellPx / 2 - drag.boardRect.left) / cellPx);
     const row = Math.floor((y + cellPx / 2 - drag.boardRect.top) / cellPx);
     if (drag.anchor && drag.anchor.row === row && drag.anchor.col === col) return;
@@ -891,7 +907,6 @@ function initUI() {
     endDrag();
     sound.invalid();
     const slotRect = slotEls[drag.slot].getBoundingClientRect();
-    const { x, y } = ghostPos();
     ghostEl.style.transition = 'transform ' + SNAPBACK_MS + 'ms ease, opacity ' + SNAPBACK_MS + 'ms ease';
     ghostEl.style.opacity = '0.3';
     ghostEl.style.transform = 'translate3d(' + (slotRect.left + slotRect.width / 2 - drag.ghostW / 2) + 'px,' +
