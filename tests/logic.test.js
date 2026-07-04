@@ -1,9 +1,9 @@
 'use strict';
 
-/* Node test suite for the pure game logic in game.js. Run: node tests/logic.test.js */
+/* Node test suite for the pure game logic in src/logic. Run: node tests/logic.test.js */
 
-const assert = require('assert');
-const G = require('../game.js');
+import assert from 'node:assert';
+import * as G from '../src/logic/index.js';
 
 let passed = 0;
 const failures = [];

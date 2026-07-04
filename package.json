@@ -2,7 +2,7 @@
   "name": "mobile-game",
   "version": "1.0.0",
   "description": "",
-  "main": "game.js",
+  "main": "src/main.js",
   "directories": {
     "test": "tests"
   },
@@ -12,7 +12,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "devDependencies": {
     "playwright": "^1.61.1"
   }

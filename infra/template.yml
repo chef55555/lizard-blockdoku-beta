@@ -120,5 +120,5 @@ Resources:
 
 Outputs:
   FunctionUrl:
-    Description: Paste this into LEADERBOARD_URL in game.js
+    Description: Paste this into LEADERBOARD_URL in src/logic/config.js
     Value: !GetAtt FnUrl.FunctionUrl

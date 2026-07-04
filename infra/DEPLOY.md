@@ -6,7 +6,7 @@ from any computer. The code is already in this repo:
 - `backend/index.mjs`: the Lambda handler (GET /top, POST /submit)
 - `infra/template.yml`: CloudFormation for the table, role, function, and Function URL
 - `infra/budget.json` + `infra/budget-notifications.json`: $1/month billing tripwire
-- `game.js`: `LEADERBOARD_URL` near the top holds the live Function URL,
+- `src/logic/config.js`: `LEADERBOARD_URL` holds the live Function URL,
   origin-gated to github.io (deployed 2026-07-03; see step 7 for the pattern)
 
 Region for everything: **us-east-1**. Total cost at friends-and-family
@@ -108,7 +108,7 @@ budgets on an account are free. Alerts email thomas.sheffer@gmail.com at
 
 ## 7. Wire the game to it
 
-1. In `game.js`, set the Function URL (keep the test hook AND the github.io
+1. In `src/logic/config.js`, set the Function URL (keep the test hook AND the github.io
    origin gate: the API's CORS only allows that origin, so enabling it on
    localhost just spams console errors and breaks the smoke suite):
    `const LEADERBOARD_URL = (typeof window !== 'undefined' && window.__LB_URL__) || (typeof location !== 'undefined' && location.hostname.endsWith('github.io') ? 'https://xxxxxxxx.lambda-url.us-east-1.on.aws' : '');`
