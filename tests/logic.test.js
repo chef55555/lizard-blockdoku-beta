@@ -311,7 +311,8 @@ test('save v2 round-trip preserves everything', () => {
   const tray = [{ ...G.makePiece(rng), frozen: true }, null, { shapeId: 1, icon: 3, rotFree: true, rotOrig: 2 }];
   const scoreLog = [
     G.makeScoreLogEntry(1, 2, [{ icon: 3, count: 3, points: 10, perfect: false }], [], 0, 0, 30),
-    G.makeScoreLogEntry(2, 4, [{ icon: 1, count: 4, points: 10, perfect: false }], [{ icon: 1, unitCount: 2, points: 50 }], 2, 10, 128),
+    G.makeScoreLogEntry(2, 4, [{ icon: 1, count: 4, points: 10, perfect: false }], [{ icon: 1, unitCount: 2, points: 50 }], 2, 10, 128,
+      '111111111' + '.'.repeat(72), [0, 1, 2, 3, 4, 5, 6, 7, 8], [8]),
   ];
   const streakLog = [{ n: 1, gained: 30 }, { n: 2, gained: 128 }];
   const game = G.encodeGame({
@@ -1011,10 +1012,52 @@ test('validateSave: history is lenient and never discards the game', () => {
   assert.deepStrictEqual(cold.game.streakLog, [], 'a cold streak keeps no rows');
 });
 
+test('validateSave: board diagram round-trips and strips leniently', () => {
+  const filled = new Array(81).fill(1);
+  const mkGame = (scoreLog) => ({ board: filled.slice(), tray: [{ shapeId: 0, icon: 1 }, null, null], score: 5, scoreLog });
+  const boardStr = '012345012' + '.'.repeat(72);
+
+  /* A valid trio round-trips byte for byte through encode + validate. */
+  const good = G.makeScoreLogEntry(2, 4, [], [], 0, 0, 60, boardStr, [0, 1, 2], [8]);
+  const okOut = G.validateSave({ v: 2, best: 1, game: mkGame([good]) });
+  assert.deepStrictEqual(okOut.game.scoreLog[0], good, 'valid diagram preserved');
+  assert.strictEqual(okOut.game.scoreLog[0].board, boardStr);
+
+  /* Each malformed field strips ALL THREE diagram fields but KEEPS the entry so
+     it still renders (without a board). Base is a valid combo record. */
+  const base = { n: 2, placement: 4, clear: G.clearScore(2), icons: [], ms: [], streakK: 0, streakPts: 0, total: 60 };
+  const kept = (extra) => {
+    const out = G.validateSave({ v: 2, best: 1, game: mkGame([{ ...base, ...extra }]) });
+    assert.strictEqual(out.game.scoreLog.length, 1, 'entry kept');
+    const e = out.game.scoreLog[0];
+    assert.ok(!('board' in e) && !('cleared' in e) && !('placed' in e), 'diagram stripped');
+    return e;
+  };
+  kept({ board: boardStr.slice(1), cleared: [0], placed: [1] });         /* wrong length */
+  kept({ board: 'abc' + boardStr.slice(3), cleared: [0], placed: [1] }); /* letters */
+  kept({ board: boardStr, cleared: [99], placed: [1] });                 /* cleared out of range */
+  kept({ board: boardStr, cleared: [0], placed: 'nope' });               /* placed non-array */
+  kept({ board: boardStr, cleared: [0.5], placed: [1] });                /* non-int cell */
+
+  /* An older v2.2 entry with no diagram at all still renders as before. */
+  const legacy = kept({});
+  assert.strictEqual(legacy.total, 60, 'legacy entry intact');
+
+  /* A garbage entry (bad n) is still dropped whole; a good sibling survives. */
+  const withGarbage = G.validateSave({ v: 2, best: 1, game: mkGame([
+    { n: 999, placement: 0, streakK: 0, streakPts: 0, total: 5, icons: [], ms: [], board: boardStr, cleared: [0], placed: [1] },
+    good,
+  ]) });
+  assert.strictEqual(withGarbage.game.scoreLog.length, 1, 'garbage entry dropped, sibling kept');
+  assert.deepStrictEqual(withGarbage.game.scoreLog[0], good);
+});
+
 test('takeSnapshot deep-copies the score and streak logs', () => {
+  const boardStr = '222.....' + '.'.repeat(73);
   const entry = G.makeScoreLogEntry(2, 4,
     [{ icon: 1, count: 3, points: 10, perfect: false }],
-    [{ icon: 1, unitCount: 2, points: 50 }], 2, 10, 128);
+    [{ icon: 1, unitCount: 2, points: 50 }], 2, 10, 128,
+    boardStr, [0, 1, 2], [2]);
   const state = {
     board: G.emptyBoard(), tray: [null, null, null], score: 0,
     inv: { rotate: 0, undo: 0, freeze: 0, reroll: 0 }, progress: { pts: 0, combos: 0, fcombos: 0 },
@@ -1025,10 +1068,15 @@ test('takeSnapshot deep-copies the score and streak logs', () => {
   state.scoreLog.push(entry);
   state.scoreLog[0].total = -1;
   state.scoreLog[0].icons[0].count = 9;
+  state.scoreLog[0].cleared[0] = 40;
+  state.scoreLog[0].placed.push(77);
   state.streakLog[0].gained = -1;
   assert.strictEqual(snap.scoreLog.length, 1, 'array copied');
   assert.strictEqual(snap.scoreLog[0].total, 128, 'entry copied');
   assert.strictEqual(snap.scoreLog[0].icons[0].count, 3, 'nested icon objects copied');
+  assert.strictEqual(snap.scoreLog[0].board, boardStr, 'board string copied');
+  assert.deepStrictEqual(snap.scoreLog[0].cleared, [0, 1, 2], 'cleared array copied, not aliased');
+  assert.deepStrictEqual(snap.scoreLog[0].placed, [2], 'placed array copied, not aliased');
   assert.strictEqual(snap.streakLog[0].gained, 128, 'streak row copied');
 });
 

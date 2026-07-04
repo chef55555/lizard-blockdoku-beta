@@ -372,14 +372,34 @@ function applyReroll(piece, inv, rng) {
   return { piece: rerollPiece(piece, rng), inv: next, refundedRotate, refundedFreeze };
 }
 
+/* Compact 81-char snapshot of a board for a score-log entry: one char per cell
+   row-major, '.' for empty and the icon-index digit (0-5) for filled. Built at
+   the moment of scoring so the Recent-scores panel can redraw the board exactly
+   as it looked when the combo landed. */
+function boardToLogString(board) {
+  let s = '';
+  for (let i = 0; i < CELL_COUNT; i++) s += board[i] < 0 ? '.' : String(board[i]);
+  return s;
+}
+
 /* One score-toast's worth of breakdown, frozen into a plain record for the
    Recent-scores panel and (later) the toast itself. clear is derived, never a
-   free parameter, so a record can never disagree with clearScore(n). */
-function makeScoreLogEntry(n, placement, bonuses, msBonuses, streakK, streakPts, total) {
-  return { n, placement, clear: clearScore(n),
+   free parameter, so a record can never disagree with clearScore(n). The
+   optional board/cleared/placed capture the grid at the moment of scoring (board
+   AFTER the piece landed, BEFORE the cleared cells were removed) so the panel can
+   redraw it; they are added only when a board string is supplied, so older
+   callers stay unchanged. Pure: input arrays are copied, never aliased. */
+function makeScoreLogEntry(n, placement, bonuses, msBonuses, streakK, streakPts, total, board, cleared, placed) {
+  const entry = { n, placement, clear: clearScore(n),
     icons: bonuses.map((b) => ({ icon: b.icon, count: b.count, points: b.points, perfect: b.perfect })),
     ms: msBonuses.map((m) => ({ icon: m.icon, unitCount: m.unitCount, points: m.points })),
     streakK, streakPts, total };
+  if (typeof board === 'string') {
+    entry.board = board;
+    entry.cleared = Array.isArray(cleared) ? cleared.slice() : [];
+    entry.placed = Array.isArray(placed) ? placed.slice() : [];
+  }
+  return entry;
 }
 
 /* Append to a capped history list without mutating the input. */
@@ -388,13 +408,20 @@ function pushLog(list, entry, cap) {
   return out.length > cap ? out.slice(out.length - cap) : out;
 }
 
-/* Deep copy of a score/streak history pair, tolerant of absent fields. */
+/* Deep copy of a score/streak history pair, tolerant of absent fields. board is
+   an immutable string (copied by the spread); cleared/placed are int arrays that
+   must be sliced so a snapshot can never alias the live entry's arrays. */
 function cloneScoreLog(list) {
-  return (list || []).map((e) => ({
-    ...e,
-    icons: (e.icons || []).map((x) => ({ ...x })),
-    ms: (e.ms || []).map((x) => ({ ...x })),
-  }));
+  return (list || []).map((e) => {
+    const c = {
+      ...e,
+      icons: (e.icons || []).map((x) => ({ ...x })),
+      ms: (e.ms || []).map((x) => ({ ...x })),
+    };
+    if (Array.isArray(e.cleared)) c.cleared = e.cleared.slice();
+    if (Array.isArray(e.placed)) c.placed = e.placed.slice();
+    return c;
+  });
 }
 function cloneStreakLog(list) {
   return (list || []).map((e) => ({ ...e }));
@@ -533,6 +560,38 @@ function sanitizeNickname(s) {
     .slice(0, 16);
 }
 
+/* An array of cell indexes (ints 0-80), capped at CELL_COUNT entries. Returns
+   null on any non-array or any out-of-range/non-integer member so the caller can
+   drop the whole (cosmetic) diagram rather than render a broken one. */
+function sanitizeCellList(arr) {
+  if (!Array.isArray(arr)) return null;
+  const out = [];
+  for (const v of arr.slice(0, CELL_COUNT)) {
+    if (!Number.isInteger(v) || v < 0 || v >= CELL_COUNT) return null;
+    out.push(v);
+  }
+  return out;
+}
+
+/* The optional board-diagram trio on a score entry (board/cleared/placed). It is
+   validated LENIENTLY and as a unit: board must be exactly CELL_COUNT chars each
+   '.' or '0'-'5', cleared/placed valid cell lists. Any fault returns null and the
+   caller strips all three while KEEPING the entry, so a v2.2 entry with no board
+   still renders (just without a diagram). Never throws. */
+function sanitizeBoardDiagram(e) {
+  const b = e.board;
+  if (typeof b !== 'string' || b.length !== CELL_COUNT) return null;
+  for (let i = 0; i < b.length; i++) {
+    const ch = b[i];
+    if (ch !== '.' && (ch < '0' || ch > '5')) return null;
+  }
+  const cleared = sanitizeCellList(e.cleared);
+  if (cleared === null) return null;
+  const placed = sanitizeCellList(e.placed);
+  if (placed === null) return null;
+  return { board: b, cleared, placed };
+}
+
 /* Score/streak history are cosmetic panels only. They are validated LENIENTLY:
    a bad ENTRY is dropped and its siblings kept, garbage becomes [], and no path
    here ever throws or discards the game. clear is always recomputed from n, so a
@@ -576,7 +635,14 @@ function sanitizeScoreLog(list) {
         ms.push({ icon: m.icon, unitCount, points });
       }
     }
-    out.push({ n, placement, clear: clearScore(n), icons, ms, streakK, streakPts, total });
+    const entry = { n, placement, clear: clearScore(n), icons, ms, streakK, streakPts, total };
+    const diagram = sanitizeBoardDiagram(e);
+    if (diagram) {
+      entry.board = diagram.board;
+      entry.cleared = diagram.cleared;
+      entry.placed = diagram.placed;
+    }
+    out.push(entry);
   }
   return out.slice(-SCORE_LOG_MAX);
 }
@@ -1389,6 +1455,10 @@ function initUI() {
       freezeHold = true;
       gained = shape.cells.length;
     } else if (n > 0) {
+      /* Snapshot the board for the score panel NOW: the piece has landed (its
+         cells are written) but the cleared union is still filled, so the entry
+         shows exactly what completed the combo. Capture before the clear below. */
+      const boardSnapshot = boardToLogString(board);
       for (const idx of union) board[idx] = -1;
       if (freezeHold) { /* the melt rode along with this scan */
         frozen = new Uint8Array(CELL_COUNT);
@@ -1401,7 +1471,8 @@ function initUI() {
         + msBonuses.reduce((a, b) => a + b.points, 0)
         + streakPts;
       /* A melt (freezeHold clear) logs like any other clear. */
-      scoreEntry = makeScoreLogEntry(n, shape.cells.length, bonuses, msBonuses, streak, streakPts, gained);
+      scoreEntry = makeScoreLogEntry(n, shape.cells.length, bonuses, msBonuses, streak, streakPts, gained,
+        boardSnapshot, [...union], placedIdx);
       scoreLog = pushLog(scoreLog, scoreEntry, SCORE_LOG_MAX);
       streakLog = pushLog(streakLog, { n, gained }, STREAK_LOG_MAX);
     } else {
@@ -1725,11 +1796,51 @@ function initUI() {
     return t;
   }
 
+  /* A 9x9 mini board redraw from an entry's captured snapshot, reusing the
+     scoring-sheet visual language (.mini/.mc, .filled, .land, .ring). Filled
+     cells show their icon; the landing piece's cells get the dashed .land
+     treatment (exactly like the help sheet's landing cells); cleared cells get
+     the gold .ring. Assumes entry.board is a valid CELL_COUNT-char string. */
+  function buildMiniBoard(entry) {
+    const placedSet = new Set(entry.placed || []);
+    const clearedSet = new Set(entry.cleared || []);
+    const grid = document.createElement('div');
+    grid.className = 'mini mini-9';
+    grid.style.setProperty('--mini-cols', 9);
+    for (let i = 0; i < entry.board.length; i++) {
+      const ch = entry.board[i];
+      const cell = document.createElement('div');
+      cell.className = 'mc';
+      const icon = (ch >= '0' && ch <= '5') ? ch.charCodeAt(0) - 48 : -1;
+      const landed = placedSet.has(i);
+      if (icon >= 0) {
+        cell.classList.add(landed ? 'land' : 'filled');
+        const ic = document.createElement('span');
+        ic.className = 'ic';
+        ic.textContent = ICONS[icon];
+        cell.appendChild(ic);
+      } else if (landed) {
+        cell.classList.add('land');
+      }
+      if (clearedSet.has(i)) cell.classList.add('ring');
+      grid.appendChild(cell);
+    }
+    const wrap = document.createElement('div');
+    wrap.className = 'bd-mini';
+    wrap.appendChild(grid);
+    return wrap;
+  }
+
   /* The per-clear score breakdown, built from one makeScoreLogEntry record so
      the live toast and the Recent-scores panel can never disagree. Returns the
-     box plus whether a lizard bonus showed (the toast pulses pink for it). */
-  function buildBreakdown(entry) {
+     box plus whether a lizard bonus showed (the toast pulses pink for it). With
+     opts.board, and when the entry carries a valid snapshot, a mini board is
+     drawn above the rows: panel-only, so the live toast stays compact. */
+  function buildBreakdown(entry, opts) {
     const box = document.createElement('div');
+    if (opts && opts.board && typeof entry.board === 'string' && entry.board.length === CELL_COUNT) {
+      box.appendChild(buildMiniBoard(entry));
+    }
     const row = (label, pts, cls) => {
       const r = document.createElement('div');
       r.className = 't-row' + (cls ? ' ' + cls : '');
@@ -1859,7 +1970,7 @@ function initUI() {
       return;
     }
     for (let i = scoreLog.length - 1; i >= 0; i--) {
-      const { box } = buildBreakdown(scoreLog[i]);
+      const { box } = buildBreakdown(scoreLog[i], { board: true });
       box.classList.add('bd-entry');
       body.appendChild(box);
     }

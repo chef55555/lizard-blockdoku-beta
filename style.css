@@ -1099,6 +1099,17 @@ header { text-align: center; height: 56px; flex: none; }
   color: var(--text);
 }
 
+/* Compact 9-wide variant for the Recent-scores panel: a whole 9x9 board has to
+   fit a ~390px sheet, so the cell shrinks and the icon scales with it. Inherits
+   every other .mini/.mc rule (colors, ring, land) so both themes follow along. */
+.mini.mini-9 { --mini-cell: 12px; }
+.mini.mini-9 .ic { font-size: 9px; }
+.bd-mini {
+  display: flex;
+  justify-content: center;
+  margin: 2px 0 10px;
+}
+
 /* ---- History panels (Recent scores / This streak) ---- */
 .bd-entry {
   background: var(--toast-bg);

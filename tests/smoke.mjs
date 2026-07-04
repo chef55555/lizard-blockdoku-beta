@@ -623,6 +623,14 @@ await page.waitForTimeout(200);
 check('score pill opens the recent-scores panel', (await page.locator('#scorePanel:not([hidden])').count()) === 1);
 check('score panel lists a breakdown ending in a total', (await page.locator('#scorePanel .bd-entry').count()) >= 1
   && (await page.locator('#scorePanel .bd-entry').first().textContent()).includes('Total'));
+{
+  const entry = page.locator('#scorePanel .bd-entry').first();
+  check('bd-entry renders a mini board of exactly 81 cells',
+    (await entry.locator('.mini.mini-9').count()) === 1
+    && (await entry.locator('.mini.mini-9 .mc').count()) === 81);
+  check('mini board rings at least one cleared cell', (await entry.locator('.mini.mini-9 .mc.ring').count()) >= 1);
+  check('mini board marks at least one landing cell', (await entry.locator('.mini.mini-9 .mc.land').count()) >= 1);
+}
 await page.tap('#scorePanelClose');
 await page.waitForTimeout(100);
 check('score panel closes', (await page.locator('#scorePanel:not([hidden])').count()) === 0);
