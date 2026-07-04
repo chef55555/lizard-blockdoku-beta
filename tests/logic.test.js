@@ -1595,6 +1595,20 @@ test('SHAPE_CLASS_META: 16 named classes exactly covering the 47 shapes', () => 
   }
 });
 
+test('validateSave: journal keeps clean strings, drops garbage, caps length', () => {
+  const lines = ['12:00:00 place s0 #0i3 @r4c8 +119 clear x1', '12:00:05 dip s1 #1'];
+  const out = G.validateSave({ v: 2, best: 1, journal: [...lines, 42, null, { evil: true }, 'x'.repeat(200), ''], game: null });
+  assert.deepStrictEqual(out.journal, lines, 'strings kept in order, non-strings and oversized lines dropped');
+
+  const many = Array.from({ length: 50 }, (_, i) => 'line ' + i);
+  const capped = G.validateSave({ v: 2, best: 1, journal: many, game: null });
+  assert.strictEqual(capped.journal.length, G.JOURNAL_MAX, 'journal capped');
+  assert.strictEqual(capped.journal[capped.journal.length - 1], 'line 49', 'newest entries kept');
+
+  assert.deepStrictEqual(G.validateSave({ v: 2, best: 1, journal: 'junk', game: null }).journal, [], 'junk journal becomes empty');
+  assert.deepStrictEqual(G.defaultMeta().journal, [], 'fresh meta starts with an empty journal');
+});
+
 test('validateSave: testTools switches are lenient and range-checked', () => {
   const out = G.validateSave({ v: 2, best: 1, testTools: { reroll1x1: true, classes: [3, 3, 99, -1, 2], icons: [5, 5, 0, 9] }, game: null });
   assert.deepStrictEqual(out.testTools, { reroll1x1: true, classes: [2, 3], icons: [0, 5] });

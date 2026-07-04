@@ -106,6 +106,7 @@
       <button id="playAgain" type="button" class="btn-main">Play Again</button>
       <button id="undoGameOver" type="button" class="btn-ghost" hidden>&#x21A9;&#xFE0F; Undo last move</button>
       <button id="lbGameOver" type="button" class="btn-ghost" hidden>&#x1F3C6; Leaderboard</button>
+      <button id="bugGameOver" type="button" class="btn-ghost" hidden>&#x1F41E; Copy bug report</button>
     </div>
   </div>
 
@@ -197,6 +198,17 @@
         <div id="iconFilterList" class="check-grid icons"></div>
         <p class="ex-note">Presets follow these filters too, except the pieces a scenario depends on. A tiny piece pool can jam a crowded board: the mercy reroll gives up after 20 tries and lets the game end honestly.</p>
         <button id="classFilterAll" type="button" class="btn-ghost">Allow everything</button>
+        <span class="set-label">Bug report</span>
+        <p class="ex-note">Captures the board, the state before your last move, and a log of recent moves. Send the copied text to Thomas.</p>
+        <div class="test-list">
+          <button id="bugCopy" type="button" class="btn-ghost">&#x1F41E; Copy bug report</button>
+          <button id="bugShare" type="button" class="btn-ghost" hidden>&#x1F4E4; Share bug report</button>
+        </div>
+        <textarea id="bugPaste" class="bug-paste" rows="3" placeholder="Paste a bug report here to load it" spellcheck="false" autocomplete="off"></textarea>
+        <div class="test-list">
+          <button id="bugLoad" type="button" class="btn-ghost">Load state</button>
+          <button id="bugLoadBefore" type="button" class="btn-ghost">Load pre-move state</button>
+        </div>
       </div>
       <button id="testToolsDone" type="button" class="btn-main">Done</button>
     </div>

@@ -11,6 +11,7 @@ const RELEASE_NOTES = [
       'A held Flip now counts when the game checks whether you are truly stuck.',
       'This "What’s new" list, right here in Settings.',
       'Beta: a Test scenarios panel with preset boards, piece and icon filters, and a 1x1-reroll switch.',
+      'Beta: one-tap bug reports that capture the board, the state before your last move, and a log of recent moves, ready to paste or share.',
     ],
   },
   {

@@ -8,6 +8,9 @@ import { cloneScoreLog, cloneStreakLog } from './history.js';
 
 /* ---- Persistence (schema v2; v1 saves migrate) ---- */
 
+/* Beta action journal: how many recent action lines a save keeps. */
+const JOURNAL_MAX = 30;
+
 function defaultMeta() {
   return {
     best: 0,
@@ -22,6 +25,9 @@ function defaultMeta() {
     /* Beta test-tool switches. null filters mean "no restriction". Production
        never writes or applies these; they still round-trip harmlessly. */
     testTools: { reroll1x1: false, classes: null, icons: null },
+    /* Beta action journal: a rolling trace of the last moves for bug reports.
+       Production never appends entries; the empty array round-trips. */
+    journal: [],
   };
 }
 
@@ -207,6 +213,13 @@ function validateSave(raw) {
       if (ics.length > 0 && ics.length < ICONS.length) out.testTools.icons = ics;
     }
   }
+  /* Journal lines are plain strings for humans; anything else is dropped,
+     lengths are capped, and only the newest JOURNAL_MAX entries survive. */
+  if (Array.isArray(raw.journal)) {
+    for (const e of raw.journal.slice(-JOURNAL_MAX)) {
+      if (typeof e === 'string' && e.length > 0 && e.length <= 160) out.journal.push(e);
+    }
+  }
 
   const g = raw.game;
   try {
@@ -309,4 +322,4 @@ function validateSave(raw) {
 }
 
 
-export { defaultMeta, frozenMaskToList, encodeGame, clampInt, sanitizeNickname, sanitizeCellList, sanitizeBoardDiagram, sanitizeScoreLog, sanitizeStreakLog, validateSave };
+export { JOURNAL_MAX, defaultMeta, frozenMaskToList, encodeGame, clampInt, sanitizeNickname, sanitizeCellList, sanitizeBoardDiagram, sanitizeScoreLog, sanitizeStreakLog, validateSave };

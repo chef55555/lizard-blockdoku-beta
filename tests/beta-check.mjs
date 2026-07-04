@@ -105,7 +105,7 @@ check('beta fresh game starts with one of each item', (await cnt('itemFlip')) ==
 console.log('2. Test panel opens from Settings (beta only)');
 await page.tap('#settingsBtn');
 await page.waitForSelector('#settings:not([hidden])');
-check('version line says beta build 22', (await page.locator('#versionLine').textContent()).includes('build 22, beta'));
+check('version line says beta build 23', (await page.locator('#versionLine').textContent()).includes('build 23, beta'));
 check('test-scenarios button is visible', await page.locator('#testToolsBtn').isVisible());
 await page.tap('#testToolsBtn');
 await page.waitForSelector('#testTools:not([hidden])');
@@ -248,6 +248,54 @@ check('release list covers the history', (await page.locator('#releaseNotesBody 
 await page.tap('#releaseNotesClose');
 await page.tap('#settingsDone');
 
+console.log('9b. Bug reports: capture, then load state and pre-move state');
+await applyScenario(0); // 8 star cells, slot 0 = star single
+await dragPiece(0, 0, 0); // place the single far from the row: no clear
+await page.waitForTimeout(700);
+await dismissItemHelpCards();
+check('board holds 9 cells before capture', (await filledCount()) === 9);
+await openTestPanel();
+await page.tap('#bugCopy');
+await page.waitForTimeout(300);
+const reportText = await page.locator('#bugPaste').inputValue();
+let report = null;
+try { report = JSON.parse(reportText); } catch (err) { /* checked below */ }
+check('capture fills the box with a parseable report', !!report);
+check('report identifies itself and the build',
+  report && report.type === 'lizard-blockdoku-bug-report' && report.build === 23 && report.channel === 'beta');
+check('report journal traces the scenario and the placement',
+  report && Array.isArray(report.journal)
+  && report.journal.some((l) => l.includes('scenario perfect1'))
+  && report.journal.some((l) => l.includes('place s0')), report && report.journal.slice(-4).join(' | '));
+check('report carries the live game (9 filled)',
+  report && report.game.board.filter((v) => v !== -1).length === 9);
+check('report carries the pre-move state (8 filled)',
+  report && report.beforeLastMove && report.beforeLastMove.board.filter((v) => v !== -1).length === 8);
+await page.tap('#testToolsDone');
+await page.tap('#settingsDone');
+await page.waitForTimeout(100);
+await applyScenario(3); // move away: 63 filled
+check('board replaced before the import test', (await filledCount()) === 63);
+await openTestPanel();
+await page.fill('#bugPaste', reportText);
+await page.tap('#bugLoad');
+await page.waitForTimeout(300);
+check('loading the report restores the captured game', (await filledCount()) === 9, 'filled=' + (await filledCount()));
+await openTestPanel();
+await page.fill('#bugPaste', reportText);
+await page.tap('#bugLoadBefore');
+await page.waitForTimeout(300);
+check('loading the pre-move state rewinds the last move', (await filledCount()) === 8, 'filled=' + (await filledCount()));
+await openTestPanel();
+await page.fill('#bugPaste', 'not json at all');
+await page.tap('#bugLoad');
+await page.waitForTimeout(300);
+check('garbage paste changes nothing', (await filledCount()) === 8);
+await page.tap('#testToolsDone');
+await page.tap('#settingsDone');
+await page.waitForTimeout(100);
+check('game-over card offers the bug button on beta', (await page.locator('#bugGameOver').getAttribute('hidden')) === null);
+
 console.log('10. Production path shows no beta tooling');
 await page.goto(PROD + '/');
 await page.waitForSelector('.cell');
@@ -262,6 +310,7 @@ check('no BETA badge on production', (await page.locator('#title .beta-tag').cou
 await page.tap('#settingsBtn');
 await page.waitForSelector('#settings:not([hidden])');
 check('test-scenarios button stays hidden on production', !(await page.locator('#testToolsBtn').isVisible()));
+check('bug-report button stays hidden on production', (await page.locator('#bugGameOver').getAttribute('hidden')) !== null);
 check('What\'s new is available on production', await page.locator('#whatsNewBtn').isVisible());
 await page.tap('#settingsDone');
 

@@ -18,6 +18,7 @@ const {
   encodeGame, sanitizeNickname, validateSave,
   SCENARIOS, buildScenario, SHAPE_CLASS_META,
   setShapeClassFilter, setIconFilter, setRerollForce1x1,
+  JOURNAL_MAX,
 } = L;
 
 /* ================================================================
@@ -386,6 +387,7 @@ function initUI() {
     }
     inv.rotate = res.rotateCount;
     tray[i] = res.piece;
+    logAction('rotate s' + i + ' #' + piece.shapeId + '->' + res.piece.shapeId + ' ' + res.kind);
     if (res.kind === 'canceled') {
       showToast('item-toast', res.refunded
         ? '⟳ Back where it started, Rotate returned!'
@@ -415,6 +417,7 @@ function initUI() {
     }
     inv.flip = res.flipCount;
     tray[i] = res.piece;
+    logAction('flip s' + i + ' #' + piece.shapeId + '->' + res.piece.shapeId + ' ' + res.kind);
     if (res.kind === 'canceled') {
       showToast('item-toast', res.refunded
         ? '⇄ Back where it started, Flip returned!'
@@ -472,6 +475,39 @@ function initUI() {
   }
 
   const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+
+  /* Beta action journal: a rolling trace of the last moves, persisted in
+     meta (each action site already calls persist) so a bug report written
+     even after a reload still shows the fatal sequence. Production never
+     appends; the tutorial's sandbox moves are skipped too. */
+  function logAction(text) {
+    if (!IS_BETA || tutorial) return;
+    const t = new Date();
+    const stamp = String(t.getHours()).padStart(2, '0') + ':'
+      + String(t.getMinutes()).padStart(2, '0') + ':'
+      + String(t.getSeconds()).padStart(2, '0');
+    meta.journal = pushLog(meta.journal || [], stamp + ' ' + text, JOURNAL_MAX);
+  }
+
+  /* Everything a bug report needs in one paste-able JSON blob: the build,
+     the environment, the test switches, the recent action trace, the live
+     game, and the state as it stood before the last move (the undo
+     snapshot). Loadable from the test panel via validateSave. */
+  function buildBugReport() {
+    return JSON.stringify({
+      type: 'lizard-blockdoku-bug-report',
+      version: APP_VERSION,
+      build: APP_BUILD,
+      channel: IS_BETA ? 'beta' : 'prod',
+      time: new Date().toISOString(),
+      ua: navigator.userAgent,
+      uiState: state,
+      testTools: meta.testTools,
+      journal: (meta.journal || []).slice(),
+      game: encodeGame({ board, tray, score, inv, progress, frozen, freezeHold, streak, scoreLog, streakLog }),
+      beforeLastMove: undoSnapshot ? encodeGame(undoSnapshot) : null,
+    });
+  }
 
   /* ---- Drag and drop ---- */
   const drag = {
@@ -858,6 +894,13 @@ function initUI() {
       over = isGameOverWithItems(board, tray, inv.rotate, inv.reroll, inv.flip);
     }
 
+    logAction('place s' + slotIdx + ' #' + piece.shapeId + 'i' + piece.icon
+      + ' @r' + row + 'c' + col + ' +' + gained
+      + (didFreeze ? ' freeze' : (n > 0 ? ' clear x' + n : ''))
+      + (freezeRefund ? ' freeze-refund' : '')
+      + (melt ? ' force-melt' : '')
+      + (over ? ' GAME-OVER' : ''));
+
     /* ---- DOM phase ---- */
     if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) { /* ignore */ } }
     sound.place();
@@ -961,9 +1004,10 @@ function initUI() {
       /* All current orientations are stuck, so the only reason the game is
          still alive is an item rescue. Tell her which one. */
       if (!tutorial && isGameOver(board, tray)) {
-        showToast('item-toast', isGameOverWithRotate(board, tray, inv.rotate)
-          ? '\u{1F3B2} Stuck? A Reroll can still save you!'
-          : '⟳ Stuck? Rotating a piece can still save you!');
+        let hint = '\u{1F3B2} Stuck? A Reroll can still save you!';
+        if (!isGameOverWithRotate(board, tray, inv.rotate)) hint = '⟳ Stuck? Rotating a piece can still save you!';
+        else if (!isGameOverWithRotate(board, tray, 0, inv.flip)) hint = '⇄ Stuck? Flipping a piece can still save you!';
+        showToast('item-toast', hint);
       }
       /* The tutorial teaches items hands-on; its crafted melt can earn a
          Rotate/Freeze, so suppress the first-earn help card here (it would
@@ -1609,6 +1653,7 @@ function initUI() {
     scoreLog = snap.scoreLog;
     streakLog = snap.streakLog;
     inv.undo = Math.max(0, inv.undo - 1);
+    logAction('undo' + (state === 'GAME_OVER' ? ' (from game over)' : ''));
     if (state === 'GAME_OVER') {
       resolveNickPrompt();
       gameOverEl.classList.remove('show');
@@ -1662,6 +1707,7 @@ function initUI() {
     if (state !== 'IDLE' || inv.freeze <= 0 || !tray[slot]) return;
     inv.freeze--;
     tray[slot] = { ...tray[slot], frozen: true };
+    logAction('dip s' + slot + ' #' + tray[slot].shapeId);
     sound.freeze();
     renderTray();
     updateItemsBar();
@@ -1693,10 +1739,13 @@ function initUI() {
   function doReroll(slot) {
     setRerollArming(false);
     if (state !== 'IDLE') return;
+    const fromShape = tray[slot] ? tray[slot].shapeId : -1;
     const res = applyReroll(tray[slot], inv, rng);
     if (!res) return;
     inv = res.inv;
     tray[slot] = res.piece;
+    logAction('reroll s' + slot + ' #' + fromShape + '->' + res.piece.shapeId
+      + (res.refundedRotate ? ' +rotate' : '') + (res.refundedFlip ? ' +flip' : '') + (res.refundedFreeze ? ' +freeze' : ''));
     showToast('item-toast', '\u{1F3B2} Fresh piece!');
     if (res.refundedRotate) showToast('item-toast', '\u{1F504} Rotate returned!');
     if (res.refundedFlip) showToast('item-toast', '\u{2194}\u{FE0F} Flip returned!');
@@ -1719,6 +1768,7 @@ function initUI() {
      only then the card shows. */
   async function endGameFromReroll() {
     state = 'RESOLVING';
+    logAction('game over (reroll dead end)' + (freezeHold ? ' force-melt' : ''));
     let newBest = false;
     if (freezeHold) {
       const melt = forceMeltAtGameOver();
@@ -2271,6 +2321,7 @@ function initUI() {
 
   function resetGame() {
     freshGameState();
+    logAction('new game');
     undoSnapshot = null;
     renderBoard();
     renderTray();
@@ -2292,6 +2343,7 @@ function initUI() {
     if (state !== 'IDLE' || tutorial) return;
     const s = buildScenario(id, rng);
     if (!s) return;
+    logAction('scenario ' + id);
     board = s.board;
     tray = s.tray;
     score = s.score;
@@ -2690,7 +2742,93 @@ function initUI() {
       settingsEl.hidden = false;
     });
 
+    /* ---- Bug reports: capture to clipboard/share, load from a paste ---- */
+    const bugPasteEl = $('bugPaste');
+
+    async function copyBugReport() {
+      const text = buildBugReport();
+      bugPasteEl.value = text; /* the box doubles as a manual copy source */
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (err) { /* clipboard can be denied; the box still has the text */ }
+      showToast('item-toast', copied
+        ? '\u{1F41E} Bug report copied! Send it to Thomas \u{1F49C}'
+        : '\u{1F41E} Report is in the box in Test scenarios: long-press to copy');
+      logAction('bug report captured');
+      persist();
+    }
+    $('bugCopy').addEventListener('click', () => { sound.tap(); copyBugReport(); });
+    $('bugGameOver').hidden = false;
+    $('bugGameOver').addEventListener('click', () => { sound.tap(); copyBugReport(); });
+    if (navigator.share) {
+      const shareBtn = $('bugShare');
+      shareBtn.hidden = false;
+      shareBtn.addEventListener('click', async () => {
+        sound.tap();
+        try {
+          await navigator.share({ title: 'Lizard Blockdoku bug report', text: buildBugReport() });
+          logAction('bug report shared');
+          persist();
+        } catch (err) { /* share sheet dismissed */ }
+      });
+    }
+
+    /* Load a pasted report (or raw save, or bare game object). Everything
+       funnels through validateSave, so a mangled paste can never corrupt the
+       live game: it just toasts and changes nothing. */
+    function loadFromPaste(which) {
+      if (state !== 'IDLE' || tutorial) return;
+      let raw = null;
+      try { raw = JSON.parse(bugPasteEl.value); } catch (err) {
+        showToast('item-toast', '\u{1F41E} That does not parse as a report');
+        return;
+      }
+      let gameObj = raw;
+      if (raw && typeof raw === 'object') {
+        if (raw.type === 'lizard-blockdoku-bug-report') gameObj = which === 'before' ? raw.beforeLastMove : raw.game;
+        else if (raw.game !== undefined) gameObj = raw.game;
+      }
+      if (which === 'before' && !gameObj) {
+        showToast('item-toast', '\u{1F41E} No pre-move state in this report');
+        return;
+      }
+      const validated = validateSave({ v: 2, game: gameObj });
+      if (!validated.game) {
+        showToast('item-toast', '\u{1F41E} That state did not validate');
+        return;
+      }
+      const g = validated.game;
+      logAction('import ' + (which === 'before' ? 'pre-move state' : 'state'));
+      board = g.board;
+      tray = g.tray;
+      if (tray.every((p) => p === null)) tray = genTray(board, rng);
+      score = g.score;
+      inv = g.inv;
+      progress = g.progress;
+      frozen = g.frozen;
+      freezeHold = g.freezeHold;
+      streak = g.streak;
+      scoreLog = g.scoreLog;
+      streakLog = g.streakLog;
+      undoSnapshot = null;
+      setArming(false);
+      setRerollArming(false);
+      renderBoard();
+      renderTray();
+      updateItemsBar();
+      updateScoreDisplay(true);
+      updateStreakPill(false);
+      persist();
+      testToolsEl.hidden = true;
+      showToast('item-toast', '\u{1F41E} State loaded');
+    }
+    $('bugLoad').addEventListener('click', () => { sound.tap(); loadFromPaste('game'); });
+    $('bugLoadBefore').addEventListener('click', () => { sound.tap(); loadFromPaste('before'); });
+
     applyGenOverrides();
+    logAction('boot build ' + APP_BUILD);
   }
 
   sound.setVolume(meta.volume);

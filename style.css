@@ -1181,6 +1181,19 @@ header { text-align: center; height: 56px; flex: none; }
   opacity: 0.8;
   margin: 0 0 10px;
 }
+.bug-paste {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 6px 0 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--pill-border);
+  background: var(--pill-bg);
+  color: var(--text);
+  font-family: monospace;
+  font-size: 11px;
+  resize: vertical;
+}
 
 /* ---- Scoring sheet ---- */
 
