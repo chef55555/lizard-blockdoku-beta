@@ -2,17 +2,38 @@
    outcome, so end-state scoring and item flows can be exercised on demand.
    Pure builders (fresh structures every call) so the Node tests can assert
    each scenario's promise. Each entry's target names the tray slot and board
-   cell of the intended move; expect declares what that move must produce. */
+   cell of the intended move; expect declares what that move must produce
+   (unfiltered; active filters can change icon-dependent bonuses).
+
+   The builders honor the beta generation filters where they can: theme and
+   filler icons stay inside the allowed icon set, and filler tray pieces are
+   drawn through the filtered pickers. Scenario-ESSENTIAL pieces keep their
+   shapes regardless of the class filter (the promise depends on them): the
+   Single that lands the target move, and nearGameOver's two Line5s. */
 
 import { emptyBoard } from './scoring.js';
 import { ITEM_CAPS } from './items.js';
-import { genTray } from './generate.js';
+import { genTray, makePiece } from './generate.js';
+import { pickIcon, iconFilterList } from './pieces.js';
 
 const idx = (r, c) => r * 9 + c;
 
-/* Perfect-match scenarios use star: every icon works, but the lizard would
-   double the bonus and muddy an A/B comparison against the plain tiers. */
+/* Perfect-match scenarios prefer star: every icon works, but the lizard
+   would double the bonus and muddy an A/B comparison against the plain
+   tiers. An icon filter that excludes it picks the lowest allowed icon. */
 const STAR = 3;
+
+function themeIcon(preferred) {
+  const allowed = iconFilterList();
+  if (!allowed || allowed.includes(preferred)) return preferred;
+  return allowed[0];
+}
+
+/* Board fillers cycle a mixed, non-lizard pool, restricted to the icon
+   filter when one is active (a one-icon filter makes them uniform). */
+function fillerPool() {
+  return iconFilterList() || [1, 2, 3, 4, 5];
+}
 
 function cappedInv() {
   const inv = {};
@@ -20,45 +41,48 @@ function cappedInv() {
   return inv;
 }
 
-/* Row 4 all star except (4,8); the tray's Single finishes one perfect set.
-   Col 8 and box 5 stay far from full, so exactly one unit clears. */
-function buildPerfect1() {
+/* Row 4 all one icon except (4,8); the tray's Single finishes one perfect
+   set. Col 8 and box 5 stay far from full, so exactly one unit clears. */
+function buildPerfect1(rng) {
+  const icon = themeIcon(STAR);
   const board = emptyBoard();
-  for (let c = 0; c < 8; c++) board[idx(4, c)] = STAR;
+  for (let c = 0; c < 8; c++) board[idx(4, c)] = icon;
   return {
     board,
-    tray: [{ shapeId: 0, icon: STAR }, { shapeId: 1, icon: 1 }, { shapeId: 9, icon: 2 }],
+    tray: [{ shapeId: 0, icon }, makePiece(rng), makePiece(rng)],
     inv: cappedInv(),
     score: 0,
   };
 }
 
-/* Row 4 and col 4 all star except their shared cell (4,4): the Single lands
-   two perfect sets at once, which is also the smallest Matching Sets combo.
-   The center box holds only 5 cells, so no accidental third unit. */
-function buildPerfect2() {
+/* Row 4 and col 4 all one icon except their shared cell (4,4): the Single
+   lands two perfect sets at once, which is also the smallest Matching Sets
+   combo. The center box holds only 5 cells, so no accidental third unit. */
+function buildPerfect2(rng) {
+  const icon = themeIcon(STAR);
   const board = emptyBoard();
-  for (let c = 0; c < 9; c++) if (c !== 4) board[idx(4, c)] = STAR;
-  for (let r = 0; r < 9; r++) if (r !== 4) board[idx(r, 4)] = STAR;
+  for (let c = 0; c < 9; c++) if (c !== 4) board[idx(4, c)] = icon;
+  for (let r = 0; r < 9; r++) if (r !== 4) board[idx(r, 4)] = icon;
   return {
     board,
-    tray: [{ shapeId: 0, icon: STAR }, { shapeId: 5, icon: 1 }, { shapeId: 9, icon: 2 }],
+    tray: [{ shapeId: 0, icon }, makePiece(rng), makePiece(rng)],
     inv: cappedInv(),
     score: 0,
   };
 }
 
-/* Row 4 + col 4 + the center box all star except (4,4): one Single, three
-   perfect sets. Neighboring rows/cols hold only 3 cells each, so exactly
-   three units clear. */
-function buildPerfect3() {
+/* Row 4 + col 4 + the center box all one icon except (4,4): one Single,
+   three perfect sets. Neighboring rows/cols hold only 3 cells each, so
+   exactly three units clear. */
+function buildPerfect3(rng) {
+  const icon = themeIcon(STAR);
   const board = emptyBoard();
-  for (let c = 0; c < 9; c++) if (c !== 4) board[idx(4, c)] = STAR;
-  for (let r = 0; r < 9; r++) if (r !== 4) board[idx(r, 4)] = STAR;
-  for (const [r, c] of [[3, 3], [3, 5], [5, 3], [5, 5]]) board[idx(r, c)] = STAR;
+  for (let c = 0; c < 9; c++) if (c !== 4) board[idx(4, c)] = icon;
+  for (let r = 0; r < 9; r++) if (r !== 4) board[idx(r, 4)] = icon;
+  for (const [r, c] of [[3, 3], [3, 5], [5, 3], [5, 5]]) board[idx(r, c)] = icon;
   return {
     board,
-    tray: [{ shapeId: 0, icon: STAR }, { shapeId: 5, icon: 1 }, { shapeId: 9, icon: 2 }],
+    tray: [{ shapeId: 0, icon }, makePiece(rng), makePiece(rng)],
     inv: cappedInv(),
     score: 0,
   };
@@ -75,17 +99,20 @@ const GAME_OVER_HOLES = [
   [3, 1], [3, 6], [4, 3], [4, 8], [5, 0], [5, 5],
   [6, 2], [6, 6], [7, 4], [7, 7], [8, 1], [8, 3],
 ];
-function buildNearGameOver() {
+function buildNearGameOver(rng) {
+  const pool = fillerPool();
   const board = emptyBoard();
   const holes = new Set(GAME_OVER_HOLES.map(([r, c]) => idx(r, c)));
   for (let r = 0; r < 9; r++) {
     for (let c = 0; c < 9; c++) {
-      if (!holes.has(idx(r, c))) board[idx(r, c)] = 1 + ((r + c) % 5);
+      if (!holes.has(idx(r, c))) board[idx(r, c)] = pool[(r + c) % pool.length];
     }
   }
+  /* All three pieces are essential to the promise; only their icons follow
+     the filter. */
   return {
     board,
-    tray: [{ shapeId: 0, icon: 1 }, { shapeId: 32, icon: 2 }, { shapeId: 33, icon: 4 }],
+    tray: [{ shapeId: 0, icon: pickIcon(rng) }, { shapeId: 32, icon: pickIcon(rng) }, { shapeId: 33, icon: pickIcon(rng) }],
     inv: cappedInv(),
     score: 0,
   };
@@ -106,16 +133,19 @@ function buildEmptyFull(rng) {
 
 /* Row 7, col 7, and the bottom-right box all filled except their shared cell
    (7,7). One Single completes a box + column + row x3 combo. Icons are
-   deliberately mixed so no perfect bonus muddies the combo reading. */
-function buildCombo3() {
+   deliberately mixed, and the Single is a heart, so NO icon bonus fires and
+   the x3 combo reads clean (a narrow icon filter can force bonuses back in;
+   that is what the tester asked for). */
+function buildCombo3(rng) {
+  const pool = fillerPool();
   const board = emptyBoard();
-  const paint = (r, c) => { board[idx(r, c)] = 1 + ((r * 2 + c) % 5); };
+  const paint = (r, c) => { board[idx(r, c)] = pool[(r * 2 + c) % pool.length]; };
   for (let c = 0; c < 9; c++) if (c !== 7) paint(7, c);
   for (let r = 0; r < 9; r++) if (r !== 7) paint(r, 7);
   for (const [r, c] of [[6, 6], [6, 8], [8, 6], [8, 8]]) paint(r, c);
   return {
     board,
-    tray: [{ shapeId: 0, icon: 2 }, { shapeId: 5, icon: 1 }, { shapeId: 13, icon: 4 }],
+    tray: [{ shapeId: 0, icon: themeIcon(2) }, makePiece(rng), makePiece(rng)],
     inv: cappedInv(),
     score: 0,
   };

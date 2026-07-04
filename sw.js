@@ -7,7 +7,7 @@
 const CHANNEL = self.location.pathname.includes('-beta') ? '-beta' : '';
 
 /* Bump CACHE on every deploy so updates reach installed phones. */
-const CACHE = 'lizard-blockdoku' + CHANNEL + '-v21';
+const CACHE = 'lizard-blockdoku' + CHANNEL + '-v22';
 /* No bundler: every ES module the app loads must be listed here, or a first
    load after an update can fetch a stale/missing module. Add new src/ files
    whenever they are created. */

@@ -1666,6 +1666,38 @@ test('scenarios: combo3 completes a row, a column, and a box', () => {
   assert.deepStrictEqual(types, ['box', 'col', 'row']);
 });
 
+test('scenarios honor the beta icon and class filters', () => {
+  const rng = mulberry32(777);
+  try {
+    G.setIconFilter([5]); /* butterflies only */
+    G.setShapeClassFilter([0]); /* Singles only */
+    for (const s of G.SCENARIOS) {
+      const st = s.build(rng);
+      for (const v of st.board) {
+        if (v !== -1) assert.strictEqual(v, 5, s.id + ': board cells use the allowed icon');
+      }
+      for (const p of st.tray) {
+        if (p) assert.strictEqual(p.icon, 5, s.id + ': tray icons stay in the allowed set');
+      }
+    }
+    const p1 = G.buildScenario('perfect1', rng);
+    assert.deepStrictEqual(p1.tray.map((p) => p.shapeId), [0, 0, 0], 'perfect1 fillers restricted to Singles');
+    const ngo = G.buildScenario('nearGameOver', rng);
+    assert.deepStrictEqual(ngo.tray.map((p) => p.shapeId), [0, 32, 33], 'nearGameOver keeps its essential shapes');
+
+    /* The re-themed icon still lands the promised perfect sets. */
+    const p2 = G.buildScenario('perfect2', rng);
+    G.placePiece(p2.board, G.SHAPES[0], 4, 4, p2.tray[0].icon);
+    const units = G.scanUnits(p2.board);
+    assert.strictEqual(units.length, 2, 'both units still complete');
+    const bonuses = G.iconBonuses(p2.board, units);
+    assert.strictEqual(bonuses.filter((b) => b.perfect && b.icon === 5).length, 2, 'two perfect butterfly sets');
+  } finally {
+    G.setIconFilter(null);
+    G.setShapeClassFilter(null);
+  }
+});
+
 test('scenarios: nearGameOver is alive before the move, dead after, items rescue', () => {
   const st = G.buildScenario('nearGameOver', mulberry32(2));
   assert.strictEqual(G.isGameOver(st.board, st.tray), false, 'the Single still fits');

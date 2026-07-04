@@ -105,7 +105,7 @@ check('beta fresh game starts with one of each item', (await cnt('itemFlip')) ==
 console.log('2. Test panel opens from Settings (beta only)');
 await page.tap('#settingsBtn');
 await page.waitForSelector('#settings:not([hidden])');
-check('version line says beta build 21', (await page.locator('#versionLine').textContent()).includes('build 21, beta'));
+check('version line says beta build 22', (await page.locator('#versionLine').textContent()).includes('build 22, beta'));
 check('test-scenarios button is visible', await page.locator('#testToolsBtn').isVisible());
 await page.tap('#testToolsBtn');
 await page.waitForSelector('#testTools:not([hidden])');
@@ -124,7 +124,18 @@ for (let i = 0; i < EXPECT_FILLED.length; i++) {
 check('scenario grants full item caps', (await cnt('itemFlip')) === '3' && (await cnt('itemFreeze')) === '3');
 
 console.log('4. Freeze fix: a wasted dip is refunded AND the stack melts');
-await applyScenario(0); // row 4 all star except (4,8); slot 0 = star single
+// Fillers are drawn from the piece pool, so pin them to Line 2 (class 1)
+// first: the wasted-dip piece must be a known 2-cell shape for the asserts.
+await openTestPanel();
+await page.tap('#classFilterAll');
+await page.waitForTimeout(150);
+for (let i = 0; i < 16; i++) {
+  if (i === 1) continue;
+  await page.locator('#classFilterList input').nth(i).uncheck();
+}
+await page.waitForTimeout(150);
+await page.locator('#testScenarioList button').nth(0).tap(); // row 4 all star except (4,8); slot 0 = star single
+await page.waitForTimeout(250);
 await page.tap('#itemFreeze');
 await page.locator('.slot').nth(0).tap(); // dip the single
 await page.waitForTimeout(300);
@@ -159,7 +170,10 @@ check('reroll under the switch hands back a 1x1',
 
 console.log('6. Class filter: L/J only, then Flip session on a chiral piece');
 await openTestPanel();
-// Uncheck every class but L/J 4 (index 8); the panel self-heals all-or-none.
+// Reset section 4's Line-2 filter, then uncheck every class but L/J 4
+// (index 8); the panel self-heals all-or-none.
+await page.tap('#classFilterAll');
+await page.waitForTimeout(150);
 for (let i = 0; i < 16; i++) {
   if (i === 8) continue;
   await page.locator('#classFilterList input').nth(i).uncheck();
@@ -194,6 +208,16 @@ await page.locator('#testScenarioList button').nth(4).tap();
 await page.waitForTimeout(300);
 const icons = await page.locator('#tray .slot .ic').allTextContents();
 check('every tray icon is a star', icons.length > 0 && icons.every((t) => t === '⭐'), icons.join(','));
+
+console.log('7b. Presets honor the active filters');
+await applyScenario(0); // perfect1 under star-only icons and L/J-only pieces
+const boardIcons = await page.locator('.cell.filled .ic').allTextContents();
+check('preset board re-themed to the allowed icon', boardIcons.length === 8 && boardIcons.every((t) => t === '⭐'), boardIcons.join(','));
+check('preset keeps its essential Single', (await page.locator('.slot').nth(0).locator('.pcell').count()) === 1);
+check('preset Single wears the allowed icon', (await page.locator('.slot').nth(0).locator('.ic').first().textContent()) === '⭐');
+check('preset fillers honor the class filter',
+  (await page.locator('.slot').nth(1).locator('.pcell').count()) === 4
+  && (await page.locator('.slot').nth(2).locator('.pcell').count()) === 4);
 
 console.log('8. Filters persist across a reload');
 await page.reload();

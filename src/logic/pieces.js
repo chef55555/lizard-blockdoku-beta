@@ -101,6 +101,12 @@ function setIconFilter(iconIdxs) {
 function setRerollForce1x1(on) { rerollForce1x1 = !!on; }
 function isRerollForce1x1() { return rerollForce1x1; }
 
+/* The active icon filter as a sorted list, or null when unrestricted. Lets
+   the scenario builders theme their boards inside the allowed set. */
+function iconFilterList() {
+  return allowedIcons ? [...allowedIcons].sort((a, b) => a - b) : null;
+}
+
 /* Next shape id after `id`, cycling within the allowed set (the whole set when
    unfiltered). With a one-shape filter this returns `id` itself: the caller's
    "hand back something different" guarantee is impossible to keep, so it
@@ -155,4 +161,5 @@ function pickIcon(rng) {
 
 export { SHAPE_CLASSES, SHAPE_CLASS_NAMES, SHAPE_CLASS_OF, SHAPE_CLASS_META, SHAPES,
   TOTAL_SHAPE_WEIGHT, TOTAL_ICON_WEIGHT, pickShapeId, pickIcon,
-  setShapeClassFilter, setIconFilter, setRerollForce1x1, isRerollForce1x1, nextAllowedShapeId };
+  setShapeClassFilter, setIconFilter, setRerollForce1x1, isRerollForce1x1,
+  iconFilterList, nextAllowedShapeId };
