@@ -410,7 +410,7 @@ test('save v2 round-trip preserves everything', () => {
   G.placePiece(b, G.SHAPES[13], 3, 3, 2);
   const frozen = new Uint8Array(81);
   frozen[3 * 9 + 3] = 1;
-  const tray = [{ ...G.makePiece(rng), frozen: true }, null, { shapeId: 1, icon: 3, rotFree: true, rotOrig: 2 }];
+  const tray = [{ ...G.makePiece(rng), frozen: true }, { shapeId: 16, icon: 2, flipFree: true, flipOrig: G.FLIP_MAP[16] }, { shapeId: 1, icon: 3, rotFree: true, rotOrig: 2 }];
   const scoreLog = [
     G.makeScoreLogEntry(1, 2, [{ icon: 3, count: 3, points: 10, perfect: false }], [], 0, 0, 30),
     G.makeScoreLogEntry(2, 4, [{ icon: 1, count: 4, points: 10, perfect: false }], [{ icon: 1, unitCount: 2, points: 50 }], 2, 10, 128,
@@ -419,14 +419,14 @@ test('save v2 round-trip preserves everything', () => {
   const streakLog = [{ n: 1, gained: 30 }, { n: 2, gained: 128 }];
   const game = G.encodeGame({
     board: b, tray, score: 123,
-    inv: { rotate: 2, undo: 1, freeze: 3, reroll: 2 },
-    progress: { pts: 150, combos: 1, fcombos: 1 },
+    inv: { rotate: 2, flip: 1, undo: 1, freeze: 3, reroll: 2 },
+    progress: { pts: 150, flipPts: 250, combos: 1, fcombos: 1 },
     frozen, freezeHold: true, streak: 2, scoreLog, streakLog,
   });
   const decoded = G.validateSave(JSON.parse(JSON.stringify({
     v: 2, best: 777, muted: true, volume: 30, theme: 'dark', nickname: 'Lizard 🦎',
     seenTutorial: true, tutorialOffered: true,
-    itemHelp: { rotate: true, undo: false, freeze: true, reroll: true },
+    itemHelp: { rotate: true, flip: false, undo: false, freeze: true, reroll: true },
     game,
   })));
   assert.strictEqual(decoded.best, 777);
@@ -436,13 +436,13 @@ test('save v2 round-trip preserves everything', () => {
   assert.strictEqual(decoded.nickname, 'Lizard 🦎');
   assert.strictEqual(decoded.seenTutorial, true);
   assert.strictEqual(decoded.tutorialOffered, true);
-  assert.deepStrictEqual(decoded.itemHelp, { rotate: true, undo: false, freeze: true, reroll: true });
+  assert.deepStrictEqual(decoded.itemHelp, { rotate: true, flip: false, undo: false, freeze: true, reroll: true });
   assert.ok(decoded.game);
   assert.deepStrictEqual(Array.from(decoded.game.board), Array.from(b));
   assert.deepStrictEqual(decoded.game.tray, tray);
   assert.strictEqual(decoded.game.score, 123);
-  assert.deepStrictEqual(decoded.game.inv, { rotate: 2, undo: 1, freeze: 3, reroll: 2 });
-  assert.deepStrictEqual(decoded.game.progress, { pts: 150, combos: 1, fcombos: 1 });
+  assert.deepStrictEqual(decoded.game.inv, { rotate: 2, flip: 1, undo: 1, freeze: 3, reroll: 2 });
+  assert.deepStrictEqual(decoded.game.progress, { pts: 150, flipPts: 250, combos: 1, fcombos: 1 });
   assert.deepStrictEqual(Array.from(decoded.game.frozen), Array.from(frozen));
   assert.strictEqual(decoded.game.freezeHold, true);
   assert.strictEqual(decoded.game.streak, 2);
@@ -462,8 +462,8 @@ test('validateSave: v1 saves migrate to v2 defaults', () => {
   assert.strictEqual(out.nickname, '');
   assert.strictEqual(out.seenTutorial, false);
   assert.ok(out.game, 'v1 game survives migration');
-  assert.deepStrictEqual(out.game.inv, { rotate: 0, undo: 0, freeze: 0, reroll: 0 });
-  assert.deepStrictEqual(out.game.progress, { pts: 0, combos: 0, fcombos: 0 });
+  assert.deepStrictEqual(out.game.inv, { rotate: 0, flip: 0, undo: 0, freeze: 0, reroll: 0 });
+  assert.deepStrictEqual(out.game.progress, { pts: 0, flipPts: 0, combos: 0, fcombos: 0 });
   assert.strictEqual(out.game.freezeHold, false);
   assert.strictEqual(Array.from(out.game.frozen).reduce((a, x) => a + x, 0), 0);
   assert.deepStrictEqual(out.game.scoreLog, [], 'v1 has no score history');
@@ -509,7 +509,7 @@ test('validateSave: hostile v2 fields', () => {
 
   const overCap = G.validateSave({ ...base, game: { ...base.game, inv: { rotate: 99, undo: -3, freeze: 2, reroll: 99 } } });
   assert.ok(overCap.game);
-  assert.deepStrictEqual(overCap.game.inv, { rotate: G.ITEM_CAPS.rotate, undo: 0, freeze: 2, reroll: G.ITEM_CAPS.reroll }, 'inv clamped to caps');
+  assert.deepStrictEqual(overCap.game.inv, { rotate: G.ITEM_CAPS.rotate, flip: 0, undo: 0, freeze: 2, reroll: G.ITEM_CAPS.reroll }, 'inv clamped to caps');
 
   const negReroll = G.validateSave({ ...base, game: { ...base.game, inv: { reroll: -1 } } });
   assert.strictEqual(negReroll.game.inv.reroll, 0, 'negative reroll floored to 0');
@@ -914,8 +914,8 @@ test('computeEarned: msCombo pays a reroll and stacks with combo and streak', ()
 test('grantItems clamps to caps, grants rerolls, and never NaNs a legacy inv', () => {
   const inv = { rotate: 2, undo: 3, freeze: 0, reroll: 1 };
   const granted = G.grantItems(inv, { rotate: 3, undo: 1, freeze: 1, reroll: 5 });
-  assert.deepStrictEqual(granted, { rotate: 1, undo: 0, freeze: 1, reroll: 2 });
-  assert.deepStrictEqual(inv, { rotate: 3, undo: 3, freeze: 1, reroll: 3 });
+  assert.deepStrictEqual(granted, { rotate: 1, flip: 0, undo: 0, freeze: 1, reroll: 2 });
+  assert.deepStrictEqual(inv, { rotate: 3, flip: 0, undo: 3, freeze: 1, reroll: 3 });
 
   /* A legacy inventory with no reroll key must not NaN: the defensive || 0
      treats the missing key as zero and grants up to the cap. */
@@ -1024,11 +1024,13 @@ test('freezeOutcome: stacking a dip that adds a fresh cell keeps the item', () =
   assert.strictEqual(r.freezeRefund, false);
 });
 
-test('freezeOutcome: a dip re-finding only frozen cells froze nothing new, refunded', () => {
+test('freezeOutcome: a dip re-finding only frozen cells is refunded and no longer freezes', () => {
+  /* v2.4 exploit fix: this dip used to report didFreeze true, which kept the
+     hold alive while the Freeze was refunded. It now resolves as undipped. */
   const frozen = new Uint8Array(81);
   frozen[10] = 1; frozen[11] = 1;
   const r = G.freezeOutcome(true, true, new Set([10, 11]), frozen);
-  assert.strictEqual(r.didFreeze, true);
+  assert.strictEqual(r.didFreeze, false, 'the melt branch runs instead');
   assert.strictEqual(r.frozeNothingNew, true);
   assert.strictEqual(r.freezeRefund, true);
 });
@@ -1071,21 +1073,32 @@ test('simulated freeze stacking: a dip stacks onto a held freeze, then one clear
   assert.strictEqual(G.clearScore(units.length), 54, 'comboN 2 melt scores as one x2');
 });
 
-test('simulated freeze stacking: a dip far from the frozen row is refunded, stack intact', () => {
+test('simulated freeze stacking: a wasted dip is refunded AND the stack melts', () => {
   const b = G.emptyBoard();
   for (let c = 0; c < 9; c++) b[idx(4, c)] = 1;
   const frozen = new Uint8Array(81);
   for (let c = 0; c < 9; c++) frozen[idx(4, c)] = 1;
 
   /* Dip a single at (0,0): it completes nothing new, but the still full row 4
-     is re-found, so the union is entirely inside the frozen mask. */
+     is re-found, so the union is entirely inside the frozen mask. The dip
+     achieved nothing: the Freeze comes back and the placement resolves as if
+     the piece was never dipped, melting the held row (v2.4 exploit fix:
+     refund plus intact stack used to keep the hold alive for free). */
   G.placePiece(b, G.SHAPES[0], 0, 0, 1);
   const units = G.scanUnits(b);
   assert.strictEqual(units.length, 1, 'only the frozen row is full');
-  const out = G.freezeOutcome(true, true, G.unionCells(units), frozen);
-  assert.strictEqual(out.didFreeze, true);
+  const union = G.unionCells(units);
+  const out = G.freezeOutcome(true, true, union, frozen);
+  assert.strictEqual(out.didFreeze, false, 'a wasted dip no longer counts as a freeze');
   assert.strictEqual(out.frozeNothingNew, true, 'no fresh cells frozen');
   assert.strictEqual(out.freezeRefund, true, 'the Freeze is handed back');
+
+  /* didFreeze false and n > 0 routes the resolve pipeline into the clear
+     branch, which melts the union and resets the mask and the hold. */
+  for (const i of union) b[i] = -1;
+  assert.ok(Array.from(b).every((v, i) => (i === 0 ? v === 1 : v === -1)),
+    'the held row cleared; the freshly placed single stays');
+  assert.strictEqual(G.clearScore(units.length), 18, 'the melt scores as a normal clear');
 });
 
 /* ---- U pentomino geometry ---- */
@@ -1277,6 +1290,401 @@ test('takeSnapshot deep-copies the score and streak logs', () => {
   assert.deepStrictEqual(snap.scoreLog[0].cleared, [0, 1, 2], 'cleared array copied, not aliased');
   assert.deepStrictEqual(snap.scoreLog[0].placed, [2], 'placed array copied, not aliased');
   assert.strictEqual(snap.streakLog[0].gained, 128, 'streak row copied');
+});
+
+/* ---- FLIP_MAP + applyFlip ---- */
+
+test('FLIP_MAP: total, bijective, involution', () => {
+  assert.strictEqual(G.FLIP_MAP.length, 47);
+  for (const t of G.FLIP_MAP) assert.ok(Number.isInteger(t) && t >= 0 && t < 47);
+  assert.strictEqual(new Set(G.FLIP_MAP).size, 47, 'bijection');
+  for (let id = 0; id < 47; id++) {
+    assert.strictEqual(G.FLIP_MAP[G.FLIP_MAP[id]], id, 'flipping twice returns shape ' + id);
+  }
+});
+
+test('FLIP_MAP: known mappings', () => {
+  assert.strictEqual(G.FLIP_MAP[0], 0, 'single is a fixed point');
+  assert.strictEqual(G.FLIP_MAP[1], 1, 'a horizontal line mirrors to itself');
+  assert.strictEqual(G.FLIP_MAP[13], 13, 'square is a fixed point');
+  assert.strictEqual(G.FLIP_MAP[38], 38, 'plus5 is a fixed point');
+  assert.strictEqual(G.FLIP_MAP[3], 4, 'diagonals swap chirality');
+  assert.strictEqual(G.FLIP_MAP[7], 8, 'long diagonals too');
+  assert.strictEqual(G.FLIP_MAP[16], 20, 'L mirrors to J');
+  assert.strictEqual(G.FLIP_MAP[24], 26, 'S mirrors to Z');
+  assert.strictEqual(G.FLIP_MAP[28], 28, 'the down-pointing T is mirror-symmetric');
+  assert.strictEqual(G.FLIP_MAP[30], 31, 'the sideways Ts mirror to each other');
+});
+
+test('flipShapeCells matches geometry', () => {
+  assert.deepStrictEqual(
+    G.flipShapeCells([[0, 0], [1, 0], [1, 1]], 2).map(([r, c]) => r + ',' + c).sort(),
+    ['0,1', '1,0', '1,1'].sort()
+  );
+  assert.deepStrictEqual(
+    G.flipShapeCells([[0, 0], [0, 1], [0, 2]], 3).map(([r, c]) => r + ',' + c).sort(),
+    ['0,0', '0,1', '0,2'].sort(),
+    'a horizontal line is its own mirror'
+  );
+});
+
+test('applyFlip: mirror-symmetric shape never charges and leaves the piece alone', () => {
+  const piece = { shapeId: 5, icon: 3 }; /* Line3-H mirrors to itself */
+  const res = G.applyFlip(piece, 3);
+  assert.strictEqual(res.kind, 'symmetric');
+  assert.strictEqual(res.flipCount, 3, 'no item spent');
+  assert.strictEqual(res.piece, piece, 'piece unchanged');
+});
+
+test('applyFlip: first mirror charges one and remembers the origin', () => {
+  const piece = { shapeId: 16, icon: 3 };
+  const res = G.applyFlip(piece, 2);
+  assert.strictEqual(res.kind, 'charged');
+  assert.strictEqual(res.flipCount, 1, 'one flip spent');
+  assert.deepStrictEqual(res.piece, { shapeId: 20, icon: 3, flipFree: true, flipOrig: 16 });
+});
+
+test('applyFlip: charging preserves a frozen flag and an open rotate session', () => {
+  const res = G.applyFlip({ shapeId: 16, icon: 3, frozen: true, rotFree: true, rotOrig: 17 }, 1);
+  assert.strictEqual(res.kind, 'charged');
+  assert.strictEqual(res.piece.frozen, true);
+  assert.strictEqual(res.piece.rotFree, true, 'paid free spins survive the mirror');
+  assert.strictEqual(res.piece.rotOrig, undefined, 'the spin cancel anchor is gone: the mirror left its orbit');
+});
+
+test('applyFlip: null when there is no session and no item', () => {
+  assert.strictEqual(G.applyFlip({ shapeId: 16, icon: 3 }, 0), null);
+});
+
+test('applyFlip: flipping back to the origin cancels and refunds', () => {
+  const piece = { shapeId: 20, icon: 3, flipFree: true, flipOrig: 16 };
+  const res = G.applyFlip(piece, 1);
+  assert.strictEqual(res.kind, 'canceled');
+  assert.strictEqual(res.flipCount, 2, 'the flip comes back');
+  assert.strictEqual(res.refunded, true);
+  assert.deepStrictEqual(res.piece, { shapeId: 16, icon: 3 }, 'flags stripped');
+});
+
+test('applyFlip: cancel refund clamps at the cap and keeps the other flags', () => {
+  const piece = { shapeId: 20, icon: 3, flipFree: true, flipOrig: 16, rotFree: true, frozen: true };
+  const res = G.applyFlip(piece, G.ITEM_CAPS.flip);
+  assert.strictEqual(res.kind, 'canceled');
+  assert.strictEqual(res.flipCount, G.ITEM_CAPS.flip, 'stays at cap');
+  assert.strictEqual(res.refunded, false, 'nothing actually returned');
+  assert.strictEqual(res.piece.frozen, true);
+  assert.strictEqual(res.piece.rotFree, true);
+  assert.strictEqual(res.piece.flipFree, undefined);
+  assert.strictEqual(res.piece.flipOrig, undefined);
+});
+
+test('applyFlip: a session without an anchor mirrors free forever, never cancels', () => {
+  let piece = { shapeId: 16, icon: 3, flipFree: true };
+  for (let i = 0; i < 4; i++) {
+    const res = G.applyFlip(piece, 0);
+    assert.strictEqual(res.kind, 'free', 'never reaches cancel without flipOrig');
+    piece = res.piece;
+  }
+  assert.strictEqual(piece.shapeId, 16, 'back to the start shape but still free');
+});
+
+test('applyRotation: a spin drops the flip cancel anchor but keeps the free mirrors', () => {
+  const charged = G.applyRotation({ shapeId: 20, icon: 1, flipFree: true, flipOrig: 16 }, 1);
+  assert.strictEqual(charged.kind, 'charged');
+  assert.strictEqual(charged.piece.flipFree, true);
+  assert.strictEqual(charged.piece.flipOrig, undefined);
+
+  const free = G.applyRotation({ shapeId: 20, icon: 1, rotFree: true, flipFree: true, flipOrig: 16 }, 0);
+  assert.strictEqual(free.kind, 'free');
+  assert.strictEqual(free.piece.flipFree, true);
+  assert.strictEqual(free.piece.flipOrig, undefined);
+});
+
+test('applyRotation: cancel keeps the free mirrors riding on the piece', () => {
+  /* L orbit is a 4-cycle, so shape 19 spins back to its origin 16. */
+  const res = G.applyRotation({ shapeId: 19, icon: 3, rotFree: true, rotOrig: 16, flipFree: true }, 0);
+  assert.strictEqual(res.kind, 'canceled');
+  assert.strictEqual(res.piece.shapeId, 16);
+  assert.strictEqual(res.piece.flipFree, true);
+});
+
+test('computeEarned: flip every 300 points with its own carry', () => {
+  let r = G.computeEarned({ pts: 0, flipPts: 290, combos: 0 }, { gained: 30, comboN: 0, perfectCount: 0 });
+  assert.strictEqual(r.earned.flip, 1);
+  assert.strictEqual(r.progress.flipPts, 20);
+  r = G.computeEarned({ pts: 0, combos: 0 }, { gained: 601, comboN: 0, perfectCount: 0 });
+  assert.strictEqual(r.earned.rotate, 3, '601 points pay three rotates');
+  assert.strictEqual(r.earned.flip, 2, 'and two flips from the same gains');
+  assert.strictEqual(r.progress.pts, 1);
+  assert.strictEqual(r.progress.flipPts, 1);
+  const legacy = G.computeEarned({ pts: 10, combos: 0 }, { gained: 20, comboN: 0, perfectCount: 0 });
+  assert.strictEqual(legacy.progress.flipPts, 20, 'a legacy progress without flipPts starts from zero');
+});
+
+test('applyReroll: refunds an open flip session, clamped at the cap', () => {
+  const rng = mulberry32(44);
+  const piece = { shapeId: 20, icon: 2, flipFree: true, flipOrig: 16 };
+  const res = G.applyReroll(piece, { rotate: 0, flip: 0, undo: 0, freeze: 0, reroll: 1 }, rng);
+  assert.strictEqual(res.refundedFlip, true);
+  assert.strictEqual(res.inv.flip, 1, 'flip returned');
+  assert.strictEqual(res.piece.flipFree, undefined, 'fresh piece carries no flip session');
+  const capped = G.applyReroll(piece, { rotate: 0, flip: G.ITEM_CAPS.flip, undo: 0, freeze: 0, reroll: 1 }, rng);
+  assert.strictEqual(capped.refundedFlip, false, 'nothing actually returned at cap');
+  assert.strictEqual(capped.inv.flip, G.ITEM_CAPS.flip);
+  const legacy = G.applyReroll(piece, { rotate: 0, undo: 0, freeze: 0, reroll: 1 }, rng);
+  assert.strictEqual(legacy.inv.flip, 1, 'a legacy inv without a flip key refunds cleanly');
+});
+
+test('validateSave: flip session flags accepted, hostile values rejected, symmetric scrub', () => {
+  const empty = new Array(81).fill(-1);
+  const mk = (piece) => G.validateSave({
+    v: 2, best: 1,
+    game: { board: empty.slice(), tray: [piece, null, null], score: 5 },
+  });
+
+  const good = mk({ shapeId: 20, icon: 3, flipFree: true, flipOrig: 16 });
+  assert.ok(good.game, 'valid flipOrig accepted');
+  assert.deepStrictEqual(good.game.tray[0], { shapeId: 20, icon: 3, flipFree: true, flipOrig: 16 });
+
+  assert.strictEqual(mk({ shapeId: 20, icon: 3, flipFree: 'yes' }).game, null, 'non-boolean flipFree rejected');
+  assert.strictEqual(mk({ shapeId: 20, icon: 3, flipFree: true, flipOrig: '16' }).game, null, 'string flipOrig rejected');
+  assert.strictEqual(mk({ shapeId: 20, icon: 3, flipFree: true, flipOrig: 99 }).game, null, 'out-of-range flipOrig rejected');
+  assert.strictEqual(mk({ shapeId: 20, icon: 3, flipFree: true, flipOrig: 17 }).game, null, 'a non-mirror flipOrig rejected');
+
+  const noSession = mk({ shapeId: 20, icon: 3, flipOrig: 16 });
+  assert.ok(noSession.game, 'flipOrig without flipFree keeps the game');
+  assert.strictEqual(noSession.game.tray[0].flipOrig, undefined, 'orphan flipOrig dropped');
+
+  const scrub = mk({ shapeId: 5, icon: 2, flipFree: true });
+  assert.ok(scrub.game, 'mirror-symmetric flipFree keeps the game');
+  assert.deepStrictEqual(scrub.game.tray[0], { shapeId: 5, icon: 2 }, 'flipFree scrubbed off a symmetric shape');
+
+  const mkProgress = (flipPts) => G.validateSave({
+    v: 2, best: 1,
+    game: { board: empty.slice(), tray: [{ shapeId: 0, icon: 1 }, null, null], score: 5, progress: { pts: 0, flipPts, combos: 0, fcombos: 0 } },
+  }).game.progress.flipPts;
+  assert.strictEqual(mkProgress(299), 299, 'a sane flipPts survives');
+  assert.strictEqual(mkProgress(900), 0, 'out-of-range flipPts clamped');
+});
+
+/* ---- Flip-aware game over ---- */
+
+function boardWithHoles(holes) {
+  const b = new Int8Array(81).fill(1);
+  for (const [r, c] of holes) b[idx(r, c)] = -1;
+  return b;
+}
+
+test('flipRescues and orientationRescues: the mirror is reachable, the spin orbit is not', () => {
+  /* Holes shaped exactly like the J at shape 20: the L at 16 and its whole
+     spin orbit (17, 18, 19) cannot fit, only the mirror can. */
+  const b = boardWithHoles([[0, 1], [1, 1], [2, 0], [2, 1]]);
+  const L = { shapeId: 16, icon: 1 };
+  assert.strictEqual(G.fitsSomewhere(b, G.SHAPES[16]), false, 'the L itself does not fit');
+  assert.strictEqual(G.rotationRescues(b, L, 3), false, 'no rotation fits');
+  assert.strictEqual(G.flipRescues(b, L, 0), false, 'no flip in stock, no rescue');
+  assert.strictEqual(G.flipRescues(b, L, 1), true, 'one Flip buys the mirror');
+  assert.strictEqual(G.flipRescues(b, { ...L, flipFree: true }, 0), true, 'an open session mirrors free');
+  assert.strictEqual(G.flipRescues(b, { shapeId: 5, icon: 1 }, 3), false, 'a symmetric shape never flip-rescues');
+  assert.strictEqual(G.orientationRescues(b, L, 3, 0), false, 'rotate-only walk misses the mirror');
+  assert.strictEqual(G.orientationRescues(b, L, 0, 1), true, 'flip-only walk finds it');
+});
+
+test('orientationRescues: rotate and flip together reach the full dihedral orbit', () => {
+  /* Holes shaped like shape 21 (the mirror rotated once): neither the spin
+     orbit alone nor the bare mirror fits; the combination does. */
+  const b = boardWithHoles([[0, 0], [1, 0], [1, 1], [1, 2]]);
+  const L = { shapeId: 16, icon: 1 };
+  assert.strictEqual(G.orientationRescues(b, L, 3, 0), false, 'rotations alone never fit');
+  assert.strictEqual(G.orientationRescues(b, L, 0, 3), false, 'the bare mirror does not fit');
+  assert.strictEqual(G.orientationRescues(b, L, 1, 1), true, 'mirror plus spin fits');
+});
+
+test('isGameOverWithRotate/WithItems: a held Flip counts as a rescue', () => {
+  const b = boardWithHoles([[0, 1], [1, 1], [2, 0], [2, 1]]);
+  const tray = [{ shapeId: 16, icon: 1 }, null, null];
+  assert.strictEqual(G.isGameOverWithRotate(b, tray, 3), true, 'the rotate-only check keeps its historic meaning');
+  assert.strictEqual(G.isGameOverWithRotate(b, tray, 0, 1), false, 'a Flip in stock rescues');
+  assert.strictEqual(G.isGameOverWithItems(b, tray, 0, 0), true, 'no items, no way out');
+  assert.strictEqual(G.isGameOverWithItems(b, tray, 0, 0, 1), false, 'a held Flip keeps the game alive');
+});
+
+/* ---- Generation overrides (beta test tools) ---- */
+
+test('generation overrides: class filter restricts pickShapeId, genTray, and reroll', () => {
+  const rng = mulberry32(77);
+  try {
+    G.setShapeClassFilter([0]); /* Single only */
+    for (let i = 0; i < 200; i++) assert.strictEqual(G.pickShapeId(rng), 0);
+    const tray = G.genTray(G.emptyBoard(), rng);
+    assert.deepStrictEqual(tray.map((p) => p.shapeId), [0, 0, 0], 'the variety guard exhausts harmlessly');
+    const rerolled = G.rerollPiece({ shapeId: 0, icon: 1 }, rng);
+    assert.strictEqual(rerolled.shapeId, 0, 'the nudge stays inside a one-shape subset');
+
+    G.setShapeClassFilter([2, 4]); /* the two diagonal classes: shapes 3, 4, 7, 8 */
+    const allowed = new Set([3, 4, 7, 8]);
+    for (let i = 0; i < 200; i++) assert.ok(allowed.has(G.pickShapeId(rng)), 'draws stay in the union');
+    const r2 = G.rerollPiece({ shapeId: 3, icon: 1 }, rng);
+    assert.ok(allowed.has(r2.shapeId), 'reroll stays in the union');
+    assert.notStrictEqual(r2.shapeId, 3, 'and still changes the shape');
+    const stuck = G.rerollPiece({ shapeId: 3, icon: 1 }, () => 0);
+    assert.ok(allowed.has(stuck.shapeId), 'a stuck rng nudges inside the subset, never out');
+  } finally {
+    G.setShapeClassFilter(null);
+  }
+});
+
+test('generation overrides: icon filter restricts pickIcon and both piece factories', () => {
+  const rng = mulberry32(88);
+  try {
+    G.setIconFilter([3]);
+    for (let i = 0; i < 200; i++) assert.strictEqual(G.pickIcon(rng), 3);
+    assert.strictEqual(G.makePiece(rng).icon, 3);
+    assert.strictEqual(G.rerollPiece({ shapeId: 5, icon: 1 }, rng).icon, 3);
+    G.setIconFilter([0, 5]);
+    for (let i = 0; i < 200; i++) assert.ok([0, 5].includes(G.pickIcon(rng)));
+  } finally {
+    G.setIconFilter(null);
+  }
+});
+
+test('generation overrides: force-1x1 reroll wins over filters and identical shapes', () => {
+  const rng = mulberry32(99);
+  try {
+    G.setRerollForce1x1(true);
+    assert.strictEqual(G.rerollPiece({ shapeId: 32, icon: 1 }, rng).shapeId, 0);
+    assert.strictEqual(G.rerollPiece({ shapeId: 0, icon: 1 }, rng).shapeId, 0, 'rerolling a Single keeps a Single');
+    G.setShapeClassFilter([11]); /* Line 5 only, deliberately excluding the Single */
+    assert.strictEqual(G.rerollPiece({ shapeId: 32, icon: 1 }, rng).shapeId, 0, 'the switch beats the class filter');
+    const tray = G.genTray(G.emptyBoard(), rng);
+    for (const p of tray) assert.ok([32, 33].includes(p.shapeId), 'tray generation still obeys the filter');
+  } finally {
+    G.setRerollForce1x1(false);
+    G.setShapeClassFilter(null);
+  }
+});
+
+test('generation overrides: empty, full, and junk selections clear the filters', () => {
+  const rng = mulberry32(111);
+  try {
+    for (const clearing of [[], [...Array(16).keys()], 'junk', null]) {
+      G.setShapeClassFilter(clearing);
+      const drawn = new Set();
+      for (let i = 0; i < 300; i++) drawn.add(G.pickShapeId(rng));
+      assert.ok(drawn.size > 16, 'draws span the whole pool after clearing with ' + JSON.stringify(clearing));
+    }
+    G.setIconFilter([0, 1, 2, 3, 4, 5]);
+    const icons = new Set();
+    for (let i = 0; i < 300; i++) icons.add(G.pickIcon(rng));
+    assert.ok(icons.size >= 4, 'a full icon selection means no filter');
+  } finally {
+    G.setShapeClassFilter(null);
+    G.setIconFilter(null);
+  }
+});
+
+test('SHAPE_CLASS_META: 16 named classes exactly covering the 47 shapes', () => {
+  assert.strictEqual(G.SHAPE_CLASS_META.length, 16);
+  assert.strictEqual(G.SHAPE_CLASS_NAMES.length, 16);
+  const all = G.SHAPE_CLASS_META.flatMap((m) => m.shapeIds);
+  assert.strictEqual(all.length, 47, 'every shape belongs to a class');
+  assert.strictEqual(new Set(all).size, 47, 'no shape in two classes');
+  assert.deepStrictEqual(G.SHAPE_CLASS_META[0].shapeIds, [0], 'the Single is class 0');
+  for (const m of G.SHAPE_CLASS_META) {
+    assert.strictEqual(m.name, G.SHAPE_CLASS_NAMES[m.classIdx]);
+    for (const id of m.shapeIds) assert.strictEqual(G.SHAPE_CLASS_OF[id], m.classIdx);
+  }
+});
+
+test('validateSave: testTools switches are lenient and range-checked', () => {
+  const out = G.validateSave({ v: 2, best: 1, testTools: { reroll1x1: true, classes: [3, 3, 99, -1, 2], icons: [5, 5, 0, 9] }, game: null });
+  assert.deepStrictEqual(out.testTools, { reroll1x1: true, classes: [2, 3], icons: [0, 5] });
+
+  const junk = G.validateSave({ v: 2, best: 1, testTools: 'nope', game: null });
+  assert.deepStrictEqual(junk.testTools, { reroll1x1: false, classes: null, icons: null });
+
+  const collapse = G.validateSave({ v: 2, best: 1, testTools: { reroll1x1: 1, classes: [...Array(16).keys()], icons: [] }, game: null });
+  assert.deepStrictEqual(collapse.testTools, { reroll1x1: false, classes: null, icons: null },
+    'a full class list, an empty icon list, and a truthy non-bool all collapse to defaults');
+});
+
+/* ---- Beta test scenarios ---- */
+
+test('scenarios: every preset builds a valid, clear-free state that round-trips', () => {
+  const rng = mulberry32(555);
+  for (const s of G.SCENARIOS) {
+    const st = s.build(rng);
+    assert.strictEqual(st.board.length, 81, s.id + ': board size');
+    for (const v of st.board) assert.ok(v >= -1 && v < G.ICONS.length, s.id + ': cell values in range');
+    assert.strictEqual(G.scanUnits(st.board).length, 0, s.id + ': no unit starts complete');
+    assert.strictEqual(st.tray.length, 3, s.id + ': three tray slots');
+    for (const p of st.tray) {
+      assert.ok(p && Number.isInteger(p.shapeId) && p.shapeId >= 0 && p.shapeId < G.SHAPES.length, s.id + ': valid piece');
+      assert.ok(Number.isInteger(p.icon) && p.icon >= 0 && p.icon < G.ICONS.length, s.id + ': valid icon');
+    }
+    assert.strictEqual(st.score, 0, s.id + ': fresh score');
+    for (const k of Object.keys(G.ITEM_CAPS)) {
+      assert.ok(st.inv[k] >= 0 && st.inv[k] <= G.ITEM_CAPS[k], s.id + ': inv within caps');
+    }
+    const game = G.encodeGame({
+      ...st,
+      progress: { pts: 0, flipPts: 0, combos: 0, fcombos: 0 },
+      frozen: new Uint8Array(81), freezeHold: false, streak: 0, scoreLog: [], streakLog: [],
+    });
+    assert.ok(G.validateSave({ v: 2, best: 0, game }).game, s.id + ': save round-trips');
+  }
+  assert.strictEqual(G.buildScenario('nope', rng), null, 'unknown id returns null');
+});
+
+test('scenarios: each target move produces exactly the declared outcome', () => {
+  const rng = mulberry32(556);
+  for (const s of G.SCENARIOS) {
+    if (!s.target) continue;
+    const st = s.build(rng);
+    const piece = st.tray[s.target.slot];
+    const shape = G.SHAPES[piece.shapeId];
+    assert.ok(G.canPlace(st.board, shape, s.target.row, s.target.col), s.id + ': target placement legal');
+    G.placePiece(st.board, shape, s.target.row, s.target.col, piece.icon);
+    const units = G.scanUnits(st.board);
+    assert.strictEqual(units.length, s.expect.units, s.id + ': unit count');
+    const bonuses = G.iconBonuses(st.board, units);
+    assert.strictEqual(bonuses.filter((b) => b.perfect).length, s.expect.perfectCount, s.id + ': perfect count');
+    const ms = G.matchingSetBonuses(bonuses);
+    if (s.expect.msUnits > 0) {
+      assert.strictEqual(ms.length, 1, s.id + ': one matching-sets bonus');
+      assert.strictEqual(ms[0].unitCount, s.expect.msUnits, s.id + ': matching-sets unit count');
+    } else {
+      assert.deepStrictEqual(ms, [], s.id + ': no matching-sets bonus');
+    }
+  }
+});
+
+test('scenarios: combo3 completes a row, a column, and a box', () => {
+  const st = G.buildScenario('combo3', mulberry32(1));
+  const piece = st.tray[0];
+  G.placePiece(st.board, G.SHAPES[piece.shapeId], 7, 7, piece.icon);
+  const types = G.scanUnits(st.board).map((u) => u.type).sort();
+  assert.deepStrictEqual(types, ['box', 'col', 'row']);
+});
+
+test('scenarios: nearGameOver is alive before the move, dead after, items rescue', () => {
+  const st = G.buildScenario('nearGameOver', mulberry32(2));
+  assert.strictEqual(G.isGameOver(st.board, st.tray), false, 'the Single still fits');
+
+  /* No hole completes a unit: every row, column, and box keeps a second one. */
+  const single = st.tray[0];
+  for (let i = 0; i < 81; i++) {
+    if (st.board[i] !== -1) continue;
+    const copy = new Int8Array(st.board);
+    copy[i] = single.icon;
+    assert.strictEqual(G.scanUnits(copy).length, 0, 'no single placement completes a unit (cell ' + i + ')');
+  }
+
+  G.placePiece(st.board, G.SHAPES[single.shapeId], 0, 0, single.icon);
+  const after = [null, st.tray[1], st.tray[2]];
+  assert.strictEqual(G.isGameOver(st.board, after), true, 'the Line5s fit nowhere');
+  assert.strictEqual(G.isGameOverWithRotate(st.board, after, 3, 3), true, 'no spin or mirror rescues a Line5');
+  assert.strictEqual(G.isGameOverWithItems(st.board, after, st.inv.rotate, st.inv.reroll, st.inv.flip), false,
+    'a held Reroll keeps the game alive');
 });
 
 /* ---- Report ---- */

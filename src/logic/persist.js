@@ -1,9 +1,9 @@
 /* Save encode + lenient validation/migration (schema v2). */
 
 import { CELL_COUNT, ICONS } from './config.js';
-import { SHAPES } from './pieces.js';
+import { SHAPES, SHAPE_CLASSES } from './pieces.js';
 import { clearScore } from './scoring.js';
-import { ITEM_CAPS, ROTATION_MAP, SCORE_LOG_MAX, STREAK_LOG_MAX } from './items.js';
+import { ITEM_CAPS, ROTATION_MAP, FLIP_MAP, SCORE_LOG_MAX, STREAK_LOG_MAX } from './items.js';
 import { cloneScoreLog, cloneStreakLog } from './history.js';
 
 /* ---- Persistence (schema v2; v1 saves migrate) ---- */
@@ -18,7 +18,10 @@ function defaultMeta() {
     nickPrompted: false,
     seenTutorial: false,
     tutorialOffered: false,
-    itemHelp: { rotate: false, undo: false, freeze: false, reroll: false },
+    itemHelp: { rotate: false, flip: false, undo: false, freeze: false, reroll: false },
+    /* Beta test-tool switches. null filters mean "no restriction". Production
+       never writes or applies these; they still round-trip harmlessly. */
+    testTools: { reroll1x1: false, classes: null, icons: null },
   };
 }
 
@@ -38,6 +41,8 @@ function encodeGame(state) {
         ...(p.frozen ? { frozen: true } : {}),
         ...(p.rotFree ? { rotFree: true } : {}),
         ...(p.rotFree && Number.isInteger(p.rotOrig) ? { rotOrig: p.rotOrig } : {}),
+        ...(p.flipFree ? { flipFree: true } : {}),
+        ...(p.flipFree && Number.isInteger(p.flipOrig) ? { flipOrig: p.flipOrig } : {}),
       }
       : null)),
     score: state.score,
@@ -185,7 +190,22 @@ function validateSave(raw) {
   out.tutorialOffered = raw.tutorialOffered === true;
   const ih = raw.itemHelp;
   if (ih && typeof ih === 'object') {
-    out.itemHelp = { rotate: ih.rotate === true, undo: ih.undo === true, freeze: ih.freeze === true, reroll: ih.reroll === true };
+    out.itemHelp = { rotate: ih.rotate === true, flip: ih.flip === true, undo: ih.undo === true, freeze: ih.freeze === true, reroll: ih.reroll === true };
+  }
+  /* Beta test tools: reroll1x1 a strict bool; class/icon lists deduped and
+     range-checked, with an empty or complete selection collapsing to null
+     (no filter) so stale saves can never half-restrict generation. */
+  const tt = raw.testTools;
+  if (tt && typeof tt === 'object') {
+    out.testTools.reroll1x1 = tt.reroll1x1 === true;
+    if (Array.isArray(tt.classes)) {
+      const cls = [...new Set(tt.classes.filter((v) => Number.isInteger(v) && v >= 0 && v < SHAPE_CLASSES.length))].sort((a, b) => a - b);
+      if (cls.length > 0 && cls.length < SHAPE_CLASSES.length) out.testTools.classes = cls;
+    }
+    if (Array.isArray(tt.icons)) {
+      const ics = [...new Set(tt.icons.filter((v) => Number.isInteger(v) && v >= 0 && v < ICONS.length))].sort((a, b) => a - b);
+      if (ics.length > 0 && ics.length < ICONS.length) out.testTools.icons = ics;
+    }
   }
 
   const g = raw.game;
@@ -230,12 +250,26 @@ function validateSave(raw) {
         if (!inOrbit) throw new Error('rotOrig out of orbit');
         piece.rotOrig = p.rotOrig;
       }
+      /* Flip session flags mirror the rotate pair. flipFree on a
+         mirror-symmetric shape is scrubbed; flipOrig is accepted only
+         alongside a live session and only as the exact mirror of the current
+         shape (flip is period two, so the orbit is just that pair). */
+      if (p.flipFree === true) {
+        if (FLIP_MAP[p.shapeId] !== p.shapeId) piece.flipFree = true;
+      } else if (p.flipFree !== undefined && p.flipFree !== false) {
+        throw new Error('bad flipFree flag');
+      }
+      if (p.flipOrig !== undefined && piece.flipFree) {
+        if (!Number.isInteger(p.flipOrig) || p.flipOrig < 0 || p.flipOrig >= SHAPES.length) throw new Error('bad flipOrig');
+        if (p.flipOrig !== FLIP_MAP[p.shapeId]) throw new Error('flipOrig is not the mirror');
+        piece.flipOrig = p.flipOrig;
+      }
       return piece;
     });
     if (typeof g.score !== 'number' || !isFinite(g.score) || g.score < 0) return out;
 
     /* v2 fields; absent (v1 game) means defaults */
-    const inv = { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
+    const inv = { rotate: 0, flip: 0, undo: 0, freeze: 0, reroll: 0 };
     if (g.inv !== undefined) {
       if (!g.inv || typeof g.inv !== 'object') return out;
       for (const k of Object.keys(inv)) {
@@ -243,10 +277,11 @@ function validateSave(raw) {
         inv[k] = Math.max(0, Math.min(ITEM_CAPS[k], g.inv[k] || 0));
       }
     }
-    const progress = { pts: 0, combos: 0, fcombos: 0 };
+    const progress = { pts: 0, flipPts: 0, combos: 0, fcombos: 0 };
     if (g.progress !== undefined) {
       if (!g.progress || typeof g.progress !== 'object') return out;
       progress.pts = clampInt(g.progress.pts, 0, 199, 0);
+      progress.flipPts = clampInt(g.progress.flipPts, 0, 299, 0);
       progress.combos = clampInt(g.progress.combos, 0, 1, 0);
       progress.fcombos = clampInt(g.progress.fcombos, 0, 1, 0);
     }

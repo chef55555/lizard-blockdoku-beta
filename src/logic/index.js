@@ -7,3 +7,4 @@ export * from './items.js';
 export * from './history.js';
 export * from './generate.js';
 export * from './persist.js';
+export * from './scenarios.js';
