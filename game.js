@@ -20,7 +20,7 @@ const SAVE_KEY = IS_BETA ? 'lizard-blockdoku-beta' : 'lizard-blockdoku-v1';
    APP_BUILD must be bumped together with the sw.js CACHE version on every
    deploy: they are numerically aligned (build 13 = cache v13). */
 const APP_VERSION = 'v2.3';
-const APP_BUILD = 16;
+const APP_BUILD = 17;
 
 /* Global leaderboard endpoint (Lambda Function URL). Only enabled when the
    game is served from github.io: the API's CORS is pinned to that origin,
@@ -37,6 +37,11 @@ const LB_KEY = 'lizard-blockdoku-lb';
    playtesting never pollutes the real board (flipped on once, 2026-07-03,
    to verify the live pipeline end to end). */
 const BETA_LB_SUBMITS = false;
+
+/* TEMPORARY test aid, beta only: fresh games start with one of each item so
+   the end-state rescue cues are easy to reach. Remove (or set to false)
+   before promoting to production. */
+const BETA_STARTER_ITEMS = IS_BETA;
 
 const ICONS = ['\u{1F98E}', '\u{1F338}', '\u{1F49C}', '⭐', '\u{1F353}', '\u{1F98B}']; /* lizard flower heart star berry butterfly */
 const ICON_WEIGHTS = [8, 23, 23, 23, 23, 23];
@@ -3269,7 +3274,9 @@ function initUI() {
   function freshGameState() {
     board = emptyBoard();
     score = 0;
-    inv = { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
+    inv = BETA_STARTER_ITEMS
+      ? { rotate: 1, undo: 1, freeze: 1, reroll: 1 }
+      : { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
     progress = { pts: 0, combos: 0, fcombos: 0 };
     frozen = new Uint8Array(CELL_COUNT);
     freezeHold = false;
