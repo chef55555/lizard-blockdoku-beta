@@ -89,33 +89,34 @@ check('score starts at 0', (await score()) === 0);
 await page.screenshot({ path: ART + 'mobile-fresh.png' });
 
 console.log('2. Drag-and-drop placement');
-// Regression (v2.1 mid-screen pop): on pickup the ghost piece must grow OUT of
-// its tray slot, not fling toward mid-screen. The old bug animated the scale
-// property on #ghost itself, multiplying its translate offset and throwing the
-// piece ~200px up in the first frames before settling back. The fix scales the
-// .piece child instead, so it only ever lifts a little toward the finger. Sample
-// the ghost piece early (while the pop is playing) and make sure it never
-// strays far from the slot it was lifted from. A bare down/up places nothing, so
-// the piece snaps back and the placement checks below run on the same piece.
+// Regression (v2.3 immediate tracking): a picked-up piece tracks the finger
+// exactly, after a brief 90ms ease-out that lets it flow out of its tray slot.
+// With the finger held still on the slot, the ghost settles centered on the
+// slot horizontally and lifted GHOST_LIFT (70px) above the finger, so its box
+// sits above the slot by the lift plus half the piece height. We measure the
+// #ghost CONTAINER, whose box is stable (the scale pop lives on the .piece
+// child and transforms do not change layout), so tall pieces no longer read as
+// a huge stray the way the old #ghost .piece sample did. Horizontal stray stays
+// tiny; vertically the ghost never drops below the slot. A bare down/up places
+// nothing, so the piece snaps back and the placement checks below run on it.
 {
   const slotBox = await page.locator('.slot').nth(0).boundingBox();
   const slotCx = slotBox.x + slotBox.width / 2;
   const slotCy = slotBox.y + slotBox.height / 2;
   await page.mouse.move(slotCx, slotCy);
   await page.mouse.down();
-  let popStray = 0;
-  let elapsed = 0;
-  for (const t of [40, 70]) { // the pop's first frames are where the old bug flung it
-    await page.waitForTimeout(t - elapsed);
-    elapsed = t;
-    const gb = await page.locator('#ghost .piece').boundingBox();
-    const d = Math.hypot(gb.x + gb.width / 2 - slotCx, gb.y + gb.height / 2 - slotCy);
-    if (d > popStray) popStray = d;
-  }
+  await page.waitForTimeout(350); // let the pickup blend finish before measuring
+  const gb = await page.locator('#ghost').boundingBox();
+  const ghostCx = gb.x + gb.width / 2;
+  const ghostCy = gb.y + gb.height / 2;
+  const ghostH = gb.height;
   await page.mouse.up(); // no movement: the piece snaps back to its slot
   await page.waitForTimeout(300);
-  check('pickup grows out of the tray slot (no mid-screen pop)', popStray < 120,
-    'max ghost stray = ' + popStray.toFixed(0) + 'px');
+  check('pickup stays horizontally over the slot', Math.abs(ghostCx - slotCx) < 50,
+    'ghost dx = ' + (ghostCx - slotCx).toFixed(0) + 'px');
+  check('pickup lifts up out of the slot, never sits below it',
+    ghostCy > slotCy - (70 + ghostH / 2) - 40 && ghostCy < slotCy + 40,
+    'ghostCy=' + ghostCy.toFixed(0) + ' slotCy=' + slotCy.toFixed(0) + ' ghostH=' + ghostH.toFixed(0));
   check('bare pickup left the piece in slot 0',
     (await page.locator('.slot').nth(0).locator('.piece').count()) === 1);
 }
@@ -517,9 +518,11 @@ check('force-melt cleared the frozen box', (await page.locator('.cell.frozen').c
   && (await filledCount()) === 57, 'filled=' + (await filledCount()));
 check('force-melt paid full scoring', (await score()) === 221, 'score=' + (await score()));
 
-console.log('7j. Tier-4 celebration: triple perfect march');
+console.log('7j. Tier-4 celebration: triple perfect flourish');
 // Rows 0 and 1 (cols 0-7) and col 8 (rows 3-8) all flowers; Line3-V at
 // (0,8) completes 3 perfect flower sets at once: 3+90+300+100 = +493.
+// Since v2.3 perfect cells fly as per-symbol flourishes in #perfectLayer
+// instead of the generic tier-4 march, which only carries non-perfect cells.
 {
   const board = new Array(81).fill(-1);
   for (let c = 0; c < 8; c++) { board[c] = 1; board[9 + c] = 1; }
@@ -534,7 +537,8 @@ console.log('7j. Tier-4 celebration: triple perfect march');
 }
 await dragPiece(0, 0, 8);
 await page.waitForTimeout(350);
-check('tier-4 clear marches off screen', (await page.locator('.fx-march').count()) > 0);
+check('triple perfect flies as flower flourishes', (await page.locator('#perfectLayer .pfx-flower').count()) > 0);
+check('perfect cells skip the generic march', (await page.locator('.fx-march').count()) === 0);
 await page.waitForSelector('#itemHelp:not([hidden])', { timeout: 6000 });
 check('x3 haul first-earns Rotate', (await page.locator('#itemHelpTitle').textContent()).includes('Rotate'));
 await page.tap('#itemHelpOk');
@@ -702,13 +706,16 @@ await page.waitForTimeout(400);
 check('gated drop snaps back', (await page.locator('.slot').nth(0).locator('.piece').count()) === 1);
 await dragPiece(0, 4, 7); // the required spot
 await page.waitForTimeout(1000);
-check('step 3 teaches icon bonuses', (await page.locator('#coachText').textContent()).includes('Match 3'));
+check('step 3 teaches the 3x3 box', (await page.locator('#coachText').textContent()).includes('3x3 box'));
+await dragPiece(0, 4, 4); // the butterfly single into the very center
+await page.waitForTimeout(1000);
+check('step 4 teaches icon bonuses', (await page.locator('#coachText').textContent()).includes('Match 3'));
 await dragPiece(0, 4, 7);
 await page.waitForTimeout(1000);
-check('step 4 teaches the previews', (await page.locator('#coachText').textContent()).includes('gold ring'));
+check('step 5 teaches the previews', (await page.locator('#coachText').textContent()).includes('gold ring'));
 await dragPiece(0, 2, 8);
 await page.waitForTimeout(1000);
-check('step 5 grants a rotate', (await page.locator('#coachText').textContent()).includes('Rotate'));
+check('step 6 grants a rotate', (await page.locator('#coachText').textContent()).includes('Rotate'));
 {
   // pickup is gated until the piece is rotated
   const slotBox = await page.locator('.slot').nth(0).boundingBox();
@@ -723,26 +730,26 @@ await page.waitForTimeout(300);
 await dragPiece(0, 4, 6);
 await page.waitForTimeout(1000);
 // Undo lesson: a forced trap drop, then rewind it.
-check('step 6 baits the undo trap', (await page.locator('#coachText').textContent()).includes('spoils'));
+check('step 7 baits the undo trap', (await page.locator('#coachText').textContent()).includes('spoils'));
 await dragPiece(0, 4, 8); // drop the star: it clears the flower row (an 8-flower bonus = tier-2 party)
 await page.waitForTimeout(1400);
-check('step 7 teaches undo', (await page.locator('#coachText').textContent()).includes('Undo'));
+check('step 8 teaches undo', (await page.locator('#coachText').textContent()).includes('Undo'));
 await page.tap('#itemUndo');
 await page.waitForTimeout(600);
 // Freeze lesson: arm the button, ice the piece, then place it.
-check('step 8 teaches freeze', (await page.locator('#coachText').textContent()).includes('Freeze'));
+check('step 9 teaches freeze', (await page.locator('#coachText').textContent()).includes('Freeze'));
 await page.tap('#itemFreeze');
 await page.locator('.slot').nth(0).tap();
 await page.waitForTimeout(600);
-check('step 9 places the iced piece', (await page.locator('#coachText').textContent()).includes('freezes solid'));
+check('step 10 places the iced piece', (await page.locator('#coachText').textContent()).includes('freezes solid'));
 await dragPiece(0, 4, 8); // the iced piece freezes the row solid
 await page.waitForTimeout(900);
 check('the finished row froze instead of clearing', (await page.locator('.cell.frozen').count()) === 9);
-check('step 10 teaches the melt', (await page.locator('#coachText').textContent()).includes('melts together'));
+check('step 11 teaches the melt', (await page.locator('#coachText').textContent()).includes('melts together'));
 await dragPiece(0, 8, 2); // finish the heart column: everything melts as one combo
 await page.waitForTimeout(1600);
 // Reroll lesson: arm the button, swap the piece.
-check('step 11 teaches reroll', (await page.locator('#coachText').textContent()).includes('Reroll'));
+check('step 12 teaches reroll', (await page.locator('#coachText').textContent()).includes('Reroll'));
 await page.tap('#itemReroll');
 await page.locator('.slot').nth(0).tap();
 await page.waitForTimeout(600);

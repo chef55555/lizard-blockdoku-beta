@@ -79,6 +79,7 @@
   <div id="ghost" hidden></div>
   <div id="glowPulse" hidden></div>
   <div id="confettiLayer" aria-hidden="true"></div>
+  <div id="perfectLayer" aria-hidden="true"></div>
 
   <div id="splash" class="overlay">
     <div class="splash-card">
@@ -113,6 +114,15 @@
       <p class="sweet-line">Your current game will be lost</p>
       <button id="confirmYes" type="button" class="btn-main">Start over</button>
       <button id="confirmNo" type="button" class="btn-ghost">Keep playing</button>
+    </div>
+  </div>
+
+  <div id="confirmReset" class="overlay" hidden>
+    <div class="card">
+      <h2>Erase everything?</h2>
+      <p class="sweet-line">Your save, best score, settings, and leaderboard name will be wiped from this device</p>
+      <button id="confirmResetYes" type="button" class="btn-main">Erase it all</button>
+      <button id="confirmResetNo" type="button" class="btn-ghost">Keep my data</button>
     </div>
   </div>
 
@@ -156,6 +166,7 @@
       <button id="lbBtn" type="button" class="btn-ghost" hidden>&#x1F3C6; Leaderboard</button>
       <button id="scoreHelpBtn" type="button" class="btn-ghost">How scoring works</button>
       <button id="replayTutorial" type="button" class="btn-ghost">Replay tutorial</button>
+      <button id="resetData" type="button" class="btn-ghost btn-danger">Reset all data</button>
       <p id="versionLine" class="version-line"></p>
       <button id="settingsDone" type="button" class="btn-main">Done</button>
     </div>
@@ -216,7 +227,7 @@
         </div>
         <div class="help-item">
           <b>&#x2744;&#xFE0F; Freeze</b><span>one per Perfect Match, every 2nd combo, and each x3 streak</span>
-          <em class="ex">Ice a piece, freeze a row, melt it into next turn's clear for a combo</em>
+          <em class="ex">Ice a piece, freeze a row, stack more, then melt it all into one clear for a combo</em>
         </div>
         <div class="help-item">
           <b>&#x1F3B2; Reroll</b><span>one per x3+ combo, each x4 streak, and every Matching Sets combo</span>

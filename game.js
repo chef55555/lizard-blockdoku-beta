@@ -19,8 +19,8 @@ const SAVE_KEY = IS_BETA ? 'lizard-blockdoku-beta' : 'lizard-blockdoku-v1';
 /* App version shown in Settings so a stale service worker is easy to spot.
    APP_BUILD must be bumped together with the sw.js CACHE version on every
    deploy: they are numerically aligned (build 13 = cache v13). */
-const APP_VERSION = 'v2.2';
-const APP_BUILD = 13;
+const APP_VERSION = 'v2.3';
+const APP_BUILD = 14;
 
 /* Global leaderboard endpoint (Lambda Function URL). Only enabled when the
    game is served from github.io: the API's CORS is pinned to that origin,
@@ -378,6 +378,23 @@ function applyReroll(piece, inv, rng) {
   return { piece: rerollPiece(piece, rng), inv: next, refundedRotate, refundedFreeze };
 }
 
+/* Decide what a placement does to the freeze system. union is the Set of
+   cells in every completed unit (scanUnits runs on the post-placement,
+   pre-clear board, so units frozen on earlier turns are re-found); frozen
+   is the current frozen mask. A dipped placement that completes units
+   freezes them, stacking onto any units already waiting. A dip that
+   completes nothing, or only re-finds cells that were already frozen,
+   achieved nothing new and hands the Freeze back. */
+function freezeOutcome(dipped, freezeHold, union, frozen) {
+  const didFreeze = dipped && union.size > 0;
+  let addsNew = false;
+  if (didFreeze) {
+    for (const idx of union) { if (!frozen[idx]) { addsNew = true; break; } }
+  }
+  const frozeNothingNew = didFreeze && freezeHold && !addsNew;
+  return { didFreeze, frozeNothingNew, freezeRefund: dipped && (!didFreeze || frozeNothingNew) };
+}
+
 /* Compact 81-char snapshot of a board for a score-log entry: one char per cell
    row-major, '.' for empty and the icon-index digit (0-5) for filled. Built at
    the moment of scoring so the Recent-scores panel can redraw the board exactly
@@ -504,6 +521,25 @@ function genTray(board, rng) {
 function isGameOver(board, tray) {
   const remaining = tray.filter(Boolean);
   return remaining.length > 0 && remaining.every((p) => !fitsSomewhere(board, SHAPES[p.shapeId]));
+}
+
+/* Rotate-aware game over. Not over if any piece fits as-is, if a piece with
+   an open free-spin session fits in any of its orientations, or if a Rotate
+   in stock could open such a session on any one piece. One Rotate unlocks a
+   piece's whole orbit, and game over only needs a single legal move to be
+   false, so one rescue anywhere is enough. An empty tray is never game over. */
+function isGameOverWithRotate(board, tray, rotateCount) {
+  const remaining = tray.filter(Boolean);
+  if (remaining.length === 0) return false;
+  for (const p of remaining) {
+    if (fitsSomewhere(board, SHAPES[p.shapeId])) return false;
+    if (p.rotFree || rotateCount > 0) {
+      for (let id = ROTATION_MAP[p.shapeId]; id !== p.shapeId; id = ROTATION_MAP[id]) {
+        if (fitsSomewhere(board, SHAPES[id])) return false;
+      }
+    }
+  }
+  return true;
 }
 
 /* ---- Persistence (schema v2; v1 saves migrate) ---- */
@@ -782,11 +818,81 @@ if (typeof module !== 'undefined' && module.exports) {
     scanUnits, unionCells, clearScore, streakBonus, iconBonusTier, iconBonuses,
     matchingSetsTier, matchingSetBonuses,
     ITEM_CAPS, SCORE_LOG_MAX, STREAK_LOG_MAX, computeEarned, grantItems,
-    rotateShapeCells, ROTATION_MAP, applyRotation, rerollPiece, applyReroll,
+    rotateShapeCells, ROTATION_MAP, applyRotation, rerollPiece, applyReroll, freezeOutcome,
     makeScoreLogEntry, pushLog, takeSnapshot,
-    pickShapeId, pickIcon, makePiece, genTray, isGameOver,
+    pickShapeId, pickIcon, makePiece, genTray, isGameOver, isGameOverWithRotate,
     defaultMeta, frozenMaskToList, encodeGame, validateSave, sanitizeNickname,
   };
+}
+
+/* ================================================================
+   Storage mirror: localStorage is the source of truth, IndexedDB is a
+   backup that survives the odd cases where an installed PWA loses its
+   localStorage (iOS eviction, storage pressure). Lazy, promise-wrapped,
+   and it NEVER rejects: any failure resolves null and the game stays
+   localStorage-only. Inert without indexedDB (Node tests import this file).
+   ================================================================ */
+
+const idb = (() => {
+  const DB_NAME = 'lizard-blockdoku'; /* shared origin: keys carry the channel */
+  const STORE = 'kv';
+  let dbPromise = null;
+  function open() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve) => {
+      try {
+        if (typeof indexedDB === 'undefined') { resolve(null); return; }
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => { req.result.createObjectStore(STORE); };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      } catch (err) { resolve(null); }
+    });
+    return dbPromise;
+  }
+  function withStore(mode, fn) {
+    return open().then((db) => new Promise((resolve) => {
+      if (!db) { resolve(null); return; }
+      try {
+        const tx = db.transaction(STORE, mode);
+        const req = fn(tx.objectStore(STORE));
+        tx.oncomplete = () => resolve(req ? req.result : null);
+        tx.onerror = () => resolve(null);
+        tx.onabort = () => resolve(null);
+      } catch (err) { resolve(null); }
+    }));
+  }
+  return {
+    get: (key) => withStore('readonly', (s) => s.get(key)),
+    put: (key, value) => withStore('readwrite', (s) => s.put(value, key)),
+    del: (key) => withStore('readwrite', (s) => s.delete(key)),
+  };
+})();
+
+const MIRROR_KEYS = [SAVE_KEY, LB_KEY, LB_KEY + '-cache'];
+
+/* Boot fallback: fill any localStorage gap from the IDB backup. */
+async function preloadFromIdb() {
+  for (const key of MIRROR_KEYS) {
+    try {
+      if (localStorage.getItem(key) !== null) continue;
+      const v = await idb.get(key);
+      if (typeof v === 'string' && localStorage.getItem(key) === null) {
+        localStorage.setItem(key, v);
+      }
+    } catch (err) { /* localStorage-only mode; play on */ }
+  }
+}
+
+/* Boot catch-up: the last fire-and-forget put of a session can die with the
+   page, so re-mirror everything present at every boot. */
+function mirrorAllToIdb() {
+  for (const key of MIRROR_KEYS) {
+    try {
+      const v = localStorage.getItem(key);
+      if (v !== null) idb.put(key, v);
+    } catch (err) { /* ignore */ }
+  }
 }
 
 /* ================================================================
@@ -794,7 +900,17 @@ if (typeof module !== 'undefined' && module.exports) {
    ================================================================ */
 
 if (typeof document !== 'undefined') {
-  initUI();
+  let saveMissing = false;
+  try { saveMissing = localStorage.getItem(SAVE_KEY) === null; } catch (err) { /* ignore */ }
+  if (saveMissing) {
+    /* Nothing local: give the IDB backup a beat to rehydrate localStorage,
+       but never let a hung IDB block boot. */
+    const grace = new Promise((res) => setTimeout(res, 600));
+    Promise.race([preloadFromIdb(), grace]).then(initUI, initUI);
+  } else {
+    preloadFromIdb(); /* background gap-fill for the lb keys only */
+    initUI();
+  }
 }
 
 function initUI() {
@@ -807,17 +923,18 @@ function initUI() {
   const SNAPBACK_MS = 150;
   const GAMEOVER_DELAY = 600;
   const GHOST_LIFT = 70;          /* px the ghost floats above the finger */
-  const GHOST_TAU = 50;           /* ms time constant of the ghost's easing */
-  /* At pickup the ghost eases slowly (trackable flight out of the slot) then
-     tightens: effective tau starts at GHOST_TAU + GHOST_TAU_BOOST and decays
-     toward GHOST_TAU with time constant GHOST_TAU_DECAY. */
-  const GHOST_TAU_BOOST = 90;
-  const GHOST_TAU_DECAY = 250;
+  /* Brief ease-out at pickup so the piece flows out of its tray slot instead
+     of teleporting; after this the ghost sits exactly on the finger target. */
+  const PICKUP_BLEND_MS = 90;
   const BADGE_STAGGER = 120;
   const MAX_PARTICLES = 36;
   /* Celebration wait, fx clone cap, and impact all escalate with the tier. */
   const CELEBRATE_WAIT = { 2: 750, 3: 950, 4: 1400 };
   const FX_CAP = { 2: 30, 3: 42, 4: 54 };
+  /* Perfect Match flourish: per-icon duration (only used to time the safety
+     sweep) and how many perfect units get their own flourish in one clear. */
+  const PERFECT_MS = [2200, 2100, 2200, 1000, 1500, 2200]; /* by icon index */
+  const PERFECT_UNIT_CAP = 3;
 
   const COMBO_PHRASES = { 2: 'So cute!', 3: 'Gorgeous!', 4: 'Queen Lizard!' };
   const COMBO_LEGENDARY = 'LEGENDARY LIZARD!!';
@@ -875,6 +992,7 @@ function initUI() {
   const confirmEl = $('confirmRestart');
   const glowEl = $('glowPulse');
   const confettiLayer = $('confettiLayer');
+  const perfectLayer = $('perfectLayer');
 
   const cellEls = [];
   const slotEls = Array.from(document.querySelectorAll('.slot'));
@@ -954,6 +1072,7 @@ function initUI() {
       undo: () => { note(720, 0, 0.07, 'triangle', 0.4, 480); note(480, 0.06, 0.09, 'triangle', 0.35, 320); },
       freeze: () => { note(1400, 0, 0.08, 'sine', 0.35); note(1100, 0.06, 0.1, 'sine', 0.3); note(880, 0.13, 0.14, 'sine', 0.25); },
       bubbles: () => { [1250, 980, 760, 610].forEach((f, i) => note(f, i * 0.07, 0.11, 'sine', 0.3, f * 1.4)); },
+      perfect: () => { [784, 988, 1319, 1568].forEach((f, i) => note(f, i * 0.06, 0.28, 'sine', 0.35, f * 1.5)); },
       fanfare: () => {
         [523, 659, 784, 1047].forEach((f, i) => note(f, i * 0.09, 0.2, 'triangle', 0.5));
         [659, 784, 1319].forEach((f) => note(f, 0.42, 0.55, 'triangle', 0.35));
@@ -1191,10 +1310,11 @@ function initUI() {
     ghostH: 0,
     px: 0,
     py: 0,
-    gx: 0,               /* eased ghost position; trails the finger target */
+    gx: 0,               /* ghost position; blends from the slot seed to target */
     gy: 0,
-    lastT: 0,
-    startT: 0,           /* pickup timestamp; the ease loosens then tightens */
+    seedX: 0,            /* tray-slot origin the pickup blend eases out of */
+    seedY: 0,
+    startT: 0,           /* pickup timestamp; drives the ease-out blend */
     startX: 0,
     startY: 0,
     moved: false,        /* a bare tap must never place a piece */
@@ -1271,26 +1391,24 @@ function initUI() {
     const seedRect = (pieceEl || slotEls[slot]).getBoundingClientRect();
     drag.gx = seedRect.left + seedRect.width / 2 - drag.ghostW / 2;
     drag.gy = seedRect.top + seedRect.height / 2 - drag.ghostH / 2;
-    drag.lastT = performance.now();
-    drag.startT = drag.lastT;
+    drag.seedX = drag.gx;
+    drag.seedY = drag.gy;
+    drag.startT = performance.now();
     ghostEl.style.transform = 'translate3d(' + drag.gx + 'px,' + drag.gy + 'px,0)';
     updateTarget();
     drag.raf = requestAnimationFrame(dragLoop);
   }
 
-  /* Exponential follower: the ghost grows out of its tray slot and trails
-     the finger with a little weight (settles in ~150ms, never overshoots). */
+  /* The ghost tracks the finger exactly. A brief ease-out blend at pickup
+     lets the piece flow out of its tray slot instead of teleporting; after
+     PICKUP_BLEND_MS it sits precisely on the finger target every frame. */
   function dragLoop(now) {
     if (!drag.active) return;
-    const dt = Math.min(32, now - (drag.lastT || now));
-    drag.lastT = now;
     const { x, y } = ghostTargetPos();
-    const tau = reducedMotion
-      ? GHOST_TAU
-      : GHOST_TAU + GHOST_TAU_BOOST * Math.exp(-(now - drag.startT) / GHOST_TAU_DECAY);
-    const k = 1 - Math.exp(-dt / tau);
-    drag.gx += (x - drag.gx) * k;
-    drag.gy += (y - drag.gy) * k;
+    const p = reducedMotion ? 1 : Math.min(1, (now - drag.startT) / PICKUP_BLEND_MS);
+    const k = 1 - (1 - p) * (1 - p);
+    drag.gx = drag.seedX + (x - drag.seedX) * k;
+    drag.gy = drag.seedY + (y - drag.seedY) * k;
     ghostEl.style.transform = 'translate3d(' + drag.gx + 'px,' + drag.gy + 'px,0)';
     updateTarget();
     drag.raf = requestAnimationFrame(dragLoop);
@@ -1433,11 +1551,15 @@ function initUI() {
 
     /* A dipped piece that completes something FREEZES the scan instead of
        clearing it: placement points only, and the units wait (still full,
-       so the next scan re-finds them) to melt into one bigger combo. A dip
-       that achieved nothing is returned. */
-    const didFreeze = dipped && !freezeHold && n > 0;
-    const freezeRefund = dipped && !didFreeze;
+       so the next scan re-finds them) to melt into one bigger combo. Freezes
+       stack: dipping again while a freeze already waits adds the new units on
+       top, so the eventual melt is one bigger combo. A dip that achieved
+       nothing (no units, or only cells already frozen) is returned. */
+    const { didFreeze, frozeNothingNew, freezeRefund } = freezeOutcome(dipped, freezeHold, union, frozen);
     if (freezeRefund) inv.freeze = Math.min(ITEM_CAPS.freeze, inv.freeze + 1);
+    /* Capture before freezeHold mutates: a dip that piled new frozen cells
+       onto an existing hold deserves the "frozen deeper" toast. */
+    const stacked = didFreeze && freezeHold && !frozeNothingNew;
 
     const bonuses = !didFreeze && n ? iconBonuses(board, units) : [];
     const msBonuses = !didFreeze && n ? matchingSetBonuses(bonuses) : [];
@@ -1448,6 +1570,9 @@ function initUI() {
     const clearDelays = computeClearDelays(units);
     const bonusCells = new Set();
     for (const b of bonuses) for (const idx of b.cells) bonusCells.add(idx);
+    /* A perfect bonus (count === 9) is a whole unit of one symbol: those get a
+       signature per-symbol flourish instead of the generic celebration clones. */
+    const perfects = bonuses.filter((b) => b.perfect);
 
     /* 3. Freeze, or clear the union and apply all scoring.
        Streak: a frozen set keeps the streak warm (unchanged); a real clear
@@ -1505,8 +1630,10 @@ function initUI() {
     const refilled = tray.every((p) => p === null);
     if (refilled) tray = genTray(board, rng);
 
-    /* 5. Fit test on the post-clear board */
-    let over = isGameOver(board, tray);
+    /* 5. Fit test on the post-clear board. Rotate-aware: a Rotate in stock (or
+       an open spin session) can rescue a piece, so the plain test short-circuits
+       the cheap common case before the orbit walk. */
+    let over = isGameOver(board, tray) && isGameOverWithRotate(board, tray, inv.rotate);
 
     /* A pending freeze force-melts at game over; the space it frees can
        rescue the game, so the fit test runs again afterwards. */
@@ -1541,7 +1668,7 @@ function initUI() {
       /* No history append: a force-melt only ever happens at game over, where
          the save is nulled anyway. The DOM phase may still build an ad hoc
          entry for the melt toast, but nothing is logged. */
-      over = isGameOver(board, tray);
+      over = isGameOverWithRotate(board, tray, inv.rotate);
     }
 
     /* ---- DOM phase ---- */
@@ -1559,7 +1686,14 @@ function initUI() {
 
     if (didFreeze) {
       sound.freeze();
-      showToast('item-toast', '❄️ Frozen! Finish another set to melt a big combo');
+      /* A dip that added new frozen cells on top of a waiting freeze stacked
+         it deeper; a dip that re-found only already-frozen cells said nothing
+         new (its refund toast fires below instead). */
+      if (stacked) {
+        showToast('item-toast', '❄️ Frozen deeper! Your next clear melts it all');
+      } else if (!frozeNothingNew) {
+        showToast('item-toast', '❄️ Frozen! Finish another set to melt a big combo');
+      }
       await wait(POP_MS + placedRender.length * POP_STAGGER);
       renderBoard(); /* paints the icy cells from the mask */
     } else if (n > 0) {
@@ -1587,7 +1721,16 @@ function initUI() {
         await wait(reducedMotion ? 160 : CLEAR_WAIT);
       } else {
         sound.impact(tier);
-        celebrate(tier, unionRender);
+        /* A perfect always lands here (its min gain clears the tier-2 floor).
+           Its 9 cells fly off with their symbol's signature flourish; the rest
+           of the clear still marches with the generic celebration clones. */
+        let celebrateRender = unionRender;
+        if (perfects.length) {
+          sound.perfect();
+          const claimed = perfectFx(perfects); /* Set of cell idx the flourish owns */
+          celebrateRender = unionRender.filter((u) => !claimed.has(u.idx));
+        }
+        celebrate(tier, celebrateRender);
         spawnParticles(union);
         await wait(CELEBRATE_WAIT[tier]);
       }
@@ -1602,7 +1745,9 @@ function initUI() {
     }
     if (freezeRefund) showToast('item-toast', '❄️ Freeze unused, returned');
 
-    /* Rare: the freeze ended the game and force-melted */
+    /* Rare: the freeze ended the game and force-melted. A perfect melting here
+       deliberately gets no per-symbol flourish: it plays the plain clear, since
+       the game is over and the flourish would fight the game-over card. */
     if (melt) {
       sound.clear(melt.n);
       for (const idx of melt.union) {
@@ -1626,6 +1771,11 @@ function initUI() {
       showGameOver(newBest);
     } else {
       state = 'IDLE';
+      /* All current orientations are stuck, so the only reason the game is
+         still alive is a rotate rescue. Tell her. */
+      if (!tutorial && isGameOver(board, tray)) {
+        showToast('item-toast', '⟳ Stuck? Rotating a piece can still save you!');
+      }
       /* The tutorial teaches items hands-on; its crafted melt can earn a
          Rotate/Freeze, so suppress the first-earn help card here (it would
          cover the coach). announceEarned's toast still reinforces the reward. */
@@ -1749,6 +1899,127 @@ function initUI() {
     setTimeout(() => {
       fxHost.querySelectorAll('.fx-cell').forEach((el) => el.remove());
     }, 2600);
+  }
+
+  /* Perfect Match: each perfect unit (a whole row, column, or box of one
+     symbol) sends its nine cells off with a signature exit by icon. Builds off
+     a single boardEl rect read (so no layout thrash), claims every cell it owns
+     so celebrate() leaves them out of the generic march, and self-sweeps.
+     reducedMotion never reaches here (tier is forced to 0 upstream), so there
+     is no separate reduced path. Returns the Set of claimed cell indices. */
+  function perfectFx(perfects) {
+    const claimed = new Set();
+    const rect = boardEl.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth;
+    const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+    /* Board center in viewport space, for the star radial burst (+3 is the
+       board's 3px frame, which the rect includes but the cell grid starts after). */
+    const cx = rect.left + 3 + (N / 2) * cellPx;
+    const cy = rect.top + 3 + (N / 2) * cellPx;
+    const frag = document.createDocumentFragment();
+    let maxMs = 0;
+    perfects.slice(0, PERFECT_UNIT_CAP).forEach((b, ui) => {
+      const base = ui * 150;   /* stagger whole units so two symbols do not fire as one */
+      const icon = b.icon;
+      /* Flowers share one gust per unit so all nine read as a single wind. */
+      const gust = (rng() < 0.5 ? -1 : 1) * (vw * 0.6 + rng() * vw * 0.35);
+      maxMs = Math.max(maxMs, base + (PERFECT_MS[icon] || 2200));
+      let k = 0;
+      for (const idx of b.cells) {
+        if (claimed.has(idx)) continue;   /* a cell shared by two perfect units is owned once */
+        claimed.add(idx);
+        const cell = cellEls[idx];
+        cell.classList.remove('flash', 'pop');
+        cell.classList.add('fade-fast');
+        const x = rect.left + 3 + ((idx % N) + 0.5) * cellPx;
+        const y = rect.top + 3 + (Math.floor(idx / N) + 0.5) * cellPx;
+        frag.appendChild(makePfx(icon, x, y, k, base, vw, vh, cx, cy, gust));
+        k++;
+      }
+    });
+    perfectLayer.appendChild(frag);
+    /* Safety sweep in case an animationend never fires (backgrounded tab, etc.). */
+    setTimeout(() => {
+      perfectLayer.querySelectorAll('.pfx').forEach((el) => el.remove());
+    }, maxMs + 800);
+    return claimed;
+  }
+
+  /* Build one .pfx glyph for a perfect cell. icon picks the exit; x/y are the
+     cell center in viewport space; k is the cell's place within its unit (for
+     waves); base is the unit's stagger; gust is the unit's shared flower wind.
+     Icons with a second, composed motion nest a span so the outer element
+     carries the travel while the span scurries, chomps, or flaps. Removal is on
+     the OUTER animation only (e.target === el), so an infinite inner flap or a
+     finite chomp never yanks the glyph early. */
+  function makePfx(icon, x, y, k, base, vw, vh, cx, cy, gust) {
+    const el = document.createElement('span');
+    el.className = 'pfx';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    let inner = null;
+    if (icon === 0) {
+      /* Lizard: scurry across the whole viewport and off the near edge. */
+      const right = rng() < 0.5;
+      el.classList.add('pfx-lizard');
+      el.style.setProperty('--dx', ((right ? (vw - x + 80) : -(x + 80)) | 0) + 'px');
+      el.style.setProperty('--dy', ((rng() * 120 - 60) | 0) + 'px');
+      el.style.setProperty('--face', (right ? 90 : -90) + 'deg');
+      el.style.setProperty('--dur', ((1400 + rng() * 800) | 0) + 'ms');
+      el.style.setProperty('--delay', ((base + rng() * 250) | 0) + 'ms');
+      inner = document.createElement('span');
+    } else if (icon === 1) {
+      /* Flower: the shared gust carries all nine off the same side; those the
+         wind reaches first (nearest its source edge) leave first. */
+      const fromLeft = gust > 0;
+      const along = fromLeft ? x : (vw - x);
+      el.classList.add('pfx-flower');
+      el.style.setProperty('--dx', (gust | 0) + 'px');
+      el.style.setProperty('--dur', ((1500 + rng() * 600) | 0) + 'ms');
+      el.style.setProperty('--delay', ((base + (along / vw) * 350) | 0) + 'ms');
+    } else if (icon === 2) {
+      /* Heart: inflate into a balloon and float off the top. */
+      el.classList.add('pfx-heart');
+      el.style.setProperty('--dy', (-(y + cellPx * 2 + 60) | 0) + 'px');
+      el.style.setProperty('--dur', ((1900 + rng() * 300) | 0) + 'ms');
+      el.style.setProperty('--delay', ((base + k * 40) | 0) + 'ms');
+    } else if (icon === 3) {
+      /* Star: shoot radially out from the board center with a rainbow trail. */
+      let ang = Math.atan2(y - cy, x - cx);
+      if (Math.abs(x - cx) < 1 && Math.abs(y - cy) < 1) ang = rng() * Math.PI * 2;
+      ang += (rng() - 0.5) * 0.5;
+      const r = 0.75 * Math.max(vw, vh) + rng() * 120;
+      el.classList.add('pfx-star');
+      el.style.setProperty('--ang', (ang * 180 / Math.PI).toFixed(1) + 'deg');
+      el.style.setProperty('--r', (r | 0) + 'px');
+      el.style.setProperty('--dur', ((900 + rng() * 100) | 0) + 'ms');
+      el.style.setProperty('--delay', ((base + k * 20) | 0) + 'ms');
+    } else if (icon === 4) {
+      /* Strawberry: eaten in place, bite by bite, in a wave across the unit. */
+      el.classList.add('pfx-berry');
+      el.style.setProperty('--delay', ((base + k * 90) | 0) + 'ms');
+      inner = document.createElement('span');
+    } else {
+      /* Butterfly: zigzag up and away off the top, wings flapping. */
+      const dir = rng() < 0.5 ? -1 : 1;
+      el.classList.add('pfx-butterfly');
+      el.style.setProperty('--dx', ((dir * rng() * vw * 0.4) | 0) + 'px');
+      el.style.setProperty('--dy', (-(y + cellPx * 2 + 80) | 0) + 'px');
+      el.style.setProperty('--sway', (((30 + rng() * 50) * (rng() < 0.5 ? -1 : 1)) | 0) + 'px');
+      el.style.setProperty('--dur', ((1900 + rng() * 300) | 0) + 'ms');
+      el.style.setProperty('--delay', ((base + k * 50) | 0) + 'ms');
+      inner = document.createElement('span');
+    }
+    if (inner) {
+      /* Custom properties inherit, so the inner motion (scurry, chomp, flap)
+         reads the same --delay/--face the outer element carries. */
+      inner.textContent = ICONS[icon];
+      el.appendChild(inner);
+    } else {
+      el.textContent = ICONS[icon];
+    }
+    el.addEventListener('animationend', (e) => { if (e.target === el) el.remove(); });
+    return el;
   }
 
   function spawnParticles(union) {
@@ -2052,7 +2323,7 @@ function initUI() {
     },
     freeze: {
       icon: '❄️', article: 'a', name: 'Freeze',
-      text: 'Ices a piece: the sets it finishes wait one turn, then melt into your next clear as one bigger combo. Earn one from Perfect Matches, every 2nd combo, and a x3 streak!',
+      text: 'Ices a piece: the sets it finishes wait, frozen solid, and melt into your next unfrozen clear as one bigger combo. Keep dipping fresh pieces to stack even more! Earn one from Perfect Matches, every 2nd combo, and a x3 streak!',
     },
     reroll: {
       icon: '\u{1F3B2}', article: 'a', name: 'Reroll',
@@ -2178,7 +2449,6 @@ function initUI() {
       return;
     }
     if (inv.freeze <= 0) return;
-    if (freezeHold) { showToast('item-toast', '❄️ A freeze is already waiting to melt'); return; }
     if (tray.some((p) => p && p.frozen)) { showToast('item-toast', '❄️ A piece is already dipped'); return; }
     setRerollArming(false);
     setArming(true);
@@ -2261,6 +2531,17 @@ function initUI() {
       allowDrop: (r, c) => r === 4 && c === 7,
     },
     {
+      text: 'Boxes clear too! Drop the \u{1F98B} in the very center to finish the middle 3x3 box!',
+      setup() {
+        board = emptyBoard();
+        const box = [[3, 3], [3, 4], [3, 5], [4, 3], [4, 5], [5, 3], [5, 4], [5, 5]];
+        [1, 2, 3, 4, 4, 3, 2, 1].forEach((icon, i) => { board[box[i][0] * N + box[i][1]] = icon; });
+        tray = [{ shapeId: 0, icon: 5 }, null, null]; /* butterfly single */
+      },
+      anchor: () => cellEls[4 * N + 4],
+      allowDrop: (r, c) => r === 4 && c === 4,
+    },
+    {
       text: 'Match 3 or more of the same icon in a set you clear and it pays a bonus! Clear this flowery row \u{1F338}',
       setup() {
         board = emptyBoard();
@@ -2294,7 +2575,7 @@ function initUI() {
       allowDrop: (r, c) => r === 4 && c === 6,
     },
     {
-      /* 5 undo-a: a tempting star that finishes the row but spoils the flower
+      /* 6 undo-a: a tempting star that finishes the row but spoils the flower
          Perfect Match. The drop is forced so the lesson lands in step 6. */
       text: 'This ⭐ finishes the row, but it spoils a flower Perfect Match. Drop it in anyway!',
       setup() {
@@ -2307,7 +2588,7 @@ function initUI() {
       allowDrop: (r, c) => r === 4 && c === 8,
     },
     {
-      /* 6 undo-b: the placed star already cleared the row; tapping Undo rewinds
+      /* 7 undo-b: the placed star already cleared the row; tapping Undo rewinds
          the whole move (the surviving snapshot brings the star back). */
       text: 'Regrets? Tap ↩️ Undo and the whole move rewinds!',
       setup() {
@@ -2318,7 +2599,7 @@ function initUI() {
       anchor: () => $('itemUndo'),
     },
     {
-      /* 7 freeze-a: arm Freeze, then tap the piece to ice it (dipPiece advances).
+      /* 8 freeze-a: arm Freeze, then tap the piece to ice it (dipPiece advances).
          allowPickup false forces the button-first gesture. */
       text: '❄️ Freeze! Tap the ❄️ button, then tap your piece to coat it in ice.',
       setup() {
@@ -2331,7 +2612,7 @@ function initUI() {
       allowPickup: () => false,
     },
     {
-      /* 8 freeze-b: the pre-iced piece finishes the row but freezes it solid. */
+      /* 9 freeze-b: the pre-iced piece finishes the row but freezes it solid. */
       text: 'Now finish the row. Watch: it freezes solid instead of clearing!',
       setup() {
         board = emptyBoard();
@@ -2342,7 +2623,7 @@ function initUI() {
       allowDrop: (r, c) => r === 4 && c === 8,
     },
     {
-      /* 9 freeze-c: a real x2 melt. The frozen flower row waits; completing the
+      /* 10 freeze-c: a real x2 melt. The frozen flower row waits; completing the
          heart column melts both together as one big combo. */
       text: 'Finish another set and everything melts together: one big combo!',
       setup() {
@@ -2357,7 +2638,7 @@ function initUI() {
       allowDrop: (r, c) => r === 8 && c === 2,
     },
     {
-      /* 10 reroll: arm Reroll, then tap the piece to swap it (doReroll advances). */
+      /* 11 reroll: arm Reroll, then tap the piece to swap it (doReroll advances). */
       text: '\u{1F3B2} A piece you do not like? Tap \u{1F3B2} Reroll, then tap the piece to swap it!',
       setup() {
         board = emptyBoard();
@@ -2513,7 +2794,7 @@ function initUI() {
       return fresh;
     }
     function saveIdentity(idn) {
-      try { localStorage.setItem(LB_KEY, JSON.stringify(idn)); } catch (err) { /* ignore */ }
+      storeBlob(LB_KEY, JSON.stringify(idn));
     }
 
     async function call(path, opts) {
@@ -2555,7 +2836,7 @@ function initUI() {
       const out = await call('/top', { method: 'GET' });
       if (!out || !Array.isArray(out.scores)) throw new Error('bad payload');
       const scores = out.scores.slice(0, 50);
-      try { localStorage.setItem(LB_KEY + '-cache', JSON.stringify(scores)); } catch (err) { /* ignore */ }
+      storeBlob(LB_KEY + '-cache', JSON.stringify(scores));
       return scores;
     }
 
@@ -2816,6 +3097,40 @@ function initUI() {
   });
   $('scoreHelpBtn').addEventListener('click', () => { sound.tap(); openScoreHelp(); });
 
+  /* Reset all data: wipe both stores, then boot as a fresh install.
+     Order matters: block re-writes first, then IDB (bounded wait, so a hung
+     delete can never trap the user), then localStorage, then reload. Per-key
+     idb.del, never deleteDatabase: our open connection would block it, and it
+     would nuke the other channel's mirror. NEVER localStorage.clear(): the
+     github.io origin is shared across repos. Resetting one channel also forgets
+     the shared leaderboard identity for the other, but the server keeps her scores. */
+  async function resetAllData() {
+    wiping = true;
+    settingsEl.hidden = true;
+    $('confirmReset').hidden = true;
+    const grace = new Promise((res) => setTimeout(res, 800));
+    try {
+      await Promise.race([Promise.all(MIRROR_KEYS.map((k) => idb.del(k))), grace]);
+    } catch (err) { /* still reload */ }
+    for (const key of MIRROR_KEYS) {
+      try { localStorage.removeItem(key); } catch (err) { /* ignore */ }
+    }
+    location.reload();
+  }
+  /* Settings must step aside while the confirm is up: both are .overlay and
+     settings comes later in the DOM, so it would paint on top of the card. */
+  $('resetData').addEventListener('click', () => {
+    sound.tap();
+    settingsEl.hidden = true;
+    $('confirmReset').hidden = false;
+  });
+  $('confirmResetNo').addEventListener('click', () => {
+    sound.tap();
+    $('confirmReset').hidden = true;
+    settingsEl.hidden = false;
+  });
+  $('confirmResetYes').addEventListener('click', () => { sound.tap(); resetAllData(); });
+
   let volPreviewAt = 0;
   volSlider.addEventListener('input', () => {
     meta.volume = Math.max(0, Math.min(100, Number(volSlider.value) || 0));
@@ -2851,14 +3166,24 @@ function initUI() {
   });
 
   /* ---- Persistence ---- */
+  let wiping = false; /* Reset all data: block every re-write until the reload */
+
+  /* localStorage first (synchronous, survives unload), then the IDB mirror.
+     Independent try blocks: a quota-dead localStorage must not starve IDB. */
+  function storeBlob(key, blob) {
+    if (wiping) return;
+    try { localStorage.setItem(key, blob); } catch (err) { /* ignore */ }
+    idb.put(key, blob);
+  }
+
   function persist() {
     try {
       if (tutorial) return; /* the tutorial never touches the real save */
       meta.best = best;
       meta.muted = sound.isMuted();
-      const over = state === 'GAME_OVER' || isGameOver(board, tray);
+      const over = state === 'GAME_OVER' || isGameOverWithRotate(board, tray, inv.rotate);
       const game = over ? null : encodeGame({ board, tray, score, inv, progress, frozen, freezeHold, streak, scoreLog, streakLog });
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 2, ...meta, game }));
+      storeBlob(SAVE_KEY, JSON.stringify({ v: 2, ...meta, game }));
     } catch (err) { /* storage may be unavailable; play on */ }
   }
 
@@ -2884,7 +3209,7 @@ function initUI() {
     meta = savedMeta;
     best = save.best;
     sound.setMuted(save.muted);
-    if (game && !isGameOver(game.board, game.tray)) {
+    if (game && !isGameOverWithRotate(game.board, game.tray, game.inv.rotate)) {
       board = game.board;
       tray = game.tray;
       score = game.score;
@@ -2908,6 +3233,11 @@ function initUI() {
       swReg.update().catch(() => {});
     }
   });
+  /* iOS often skips visibilitychange on a real close; pagehide is the reliable
+     last chance to flush. storeBlob's wiping guard keeps this quiet on reset. */
+  window.addEventListener('pagehide', () => {
+    if (state === 'IDLE' || state === 'RESOLVING') persist();
+  });
 
   /* ---- Service worker ---- */
   let swReg = null;
@@ -2928,7 +3258,11 @@ function initUI() {
     });
   }
   if (navigator.storage && navigator.storage.persist) {
-    navigator.storage.persist().catch(() => {});
+    /* Re-request at every boot until the browser grants it. */
+    const check = navigator.storage.persisted
+      ? navigator.storage.persisted().then((ok) => ok || navigator.storage.persist())
+      : navigator.storage.persist();
+    check.catch(() => {});
   }
 
   /* ---- Boot ---- */
@@ -2940,6 +3274,7 @@ function initUI() {
   }
 
   restore();
+  mirrorAllToIdb(); /* re-sync the IDB backup with whatever localStorage holds */
   sound.setVolume(meta.volume);
   applyTheme();
   relayout();

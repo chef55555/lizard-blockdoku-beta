@@ -7,7 +7,7 @@
 const CHANNEL = self.location.pathname.includes('-beta') ? '-beta' : '';
 
 /* Bump CACHE on every deploy so updates reach installed phones. */
-const CACHE = 'lizard-blockdoku' + CHANNEL + '-v13';
+const CACHE = 'lizard-blockdoku' + CHANNEL + '-v14';
 const ASSETS = [
   './',
   './index.html',

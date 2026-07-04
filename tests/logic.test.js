@@ -226,6 +226,22 @@ test('iconBonuses: shared cell counts toward every containing unit', () => {
   for (const bo of bonuses) assert.strictEqual(bo.points, 100);
 });
 
+test('tutorial box step: a center single clears only the box, no icon bonus', () => {
+  /* Mirrors the hands-on box lesson: the middle 3x3 box (rows 3-5, cols 3-5)
+     is filled point-symmetrically save the center; a butterfly single at
+     (4,4) completes it. Icon counts are 2/2/2/2/1 so no icon bonus fires, and
+     row 4 and col 4 hold only 3 cells each so nothing but the box clears. */
+  const b = G.emptyBoard();
+  const box = [[3, 3], [3, 4], [3, 5], [4, 3], [4, 5], [5, 3], [5, 4], [5, 5]];
+  [1, 2, 3, 4, 4, 3, 2, 1].forEach((icon, i) => { b[idx(box[i][0], box[i][1])] = icon; });
+  G.placePiece(b, G.SHAPES[0], 4, 4, 5); /* butterfly single */
+  const units = G.scanUnits(b);
+  assert.strictEqual(units.length, 1, 'only the middle box completes');
+  assert.strictEqual(units[0].type, 'box');
+  assert.strictEqual(units[0].index, 4);
+  assert.strictEqual(G.iconBonuses(b, units).length, 0, 'counts 2/2/2/2/1, no bonus');
+});
+
 /* ---- Generation ---- */
 
 test('pickShapeId and pickIcon stay in range across seeds', () => {
@@ -298,6 +314,59 @@ test('isGameOver: false while any piece fits, true when none does', () => {
   assert.strictEqual(G.isGameOver(b, [single, null, null]), false);
   assert.strictEqual(G.isGameOver(b, [line5, null, null]), true);
   assert.strictEqual(G.isGameOver(b, [line5, single, null]), false);
+});
+
+/* Board full except three vertical cells at column 0, rows 0-2. Only a
+   vertical 3-line fits; the horizontal Line3 (shapeId 5) must be rotated. */
+function gapBoard() {
+  const b = new Int8Array(81).fill(1);
+  b[idx(0, 0)] = -1; b[idx(1, 0)] = -1; b[idx(2, 0)] = -1;
+  return b;
+}
+
+test('isGameOverWithRotate: a Rotate in stock rescues a piece that fits only rotated', () => {
+  const b = gapBoard();
+  const tray = [{ shapeId: 5, icon: 1 }, null, null]; /* horizontal Line3 */
+  assert.strictEqual(G.isGameOver(b, tray), true, 'no current orientation fits');
+  assert.strictEqual(G.isGameOverWithRotate(b, tray, 1), false, 'a Rotate saves it');
+  assert.strictEqual(G.isGameOverWithRotate(b, tray, 0), true, 'no Rotate, truly over');
+});
+
+test('isGameOverWithRotate: an open free-spin session rescues with no Rotate in stock', () => {
+  const b = gapBoard();
+  const tray = [{ shapeId: 5, icon: 1, rotFree: true, rotOrig: 6 }, null, null];
+  assert.strictEqual(G.isGameOverWithRotate(b, tray, 0), false, 'the session unlocks its orbit');
+});
+
+test('isGameOverWithRotate: a symmetric piece cannot be rotated to fit', () => {
+  const b = new Int8Array(81).fill(1);
+  b[idx(0, 0)] = -1; /* one empty cell, only a single fits */
+  const tray = [{ shapeId: 13, icon: 1 }, null, null]; /* 2x2 square, rotation fixed point */
+  assert.strictEqual(G.isGameOverWithRotate(b, tray, 3), true, 'spinning a square does nothing');
+});
+
+test('isGameOverWithRotate: walks the whole orbit (U pentomino needs two spins)', () => {
+  const b = new Int8Array(81).fill(1);
+  for (const [r, c] of G.SHAPES[45].cells) b[idx(r, c)] = -1; /* hole is exactly SHAPES[45] */
+  const tray = [{ shapeId: 43, icon: 1 }, null, null]; /* 43 -> 46 -> 45 reaches the fit */
+  assert.strictEqual(G.isGameOverWithRotate(b, tray, 1), false, 'the orbit reaches shape 45');
+  assert.strictEqual(G.isGameOverWithRotate(b, tray, 0), true, 'as-is it fits nowhere');
+});
+
+test('isGameOverWithRotate: one piece\'s session does not unlock another piece', () => {
+  const b = gapBoard();
+  const tray = [
+    { shapeId: 43, icon: 1, rotFree: true, rotOrig: 44 }, /* pentomino, no orbit member fits */
+    { shapeId: 5, icon: 1 },                              /* Line3, fits only when rotated */
+    null,
+  ];
+  assert.strictEqual(G.isGameOverWithRotate(b, tray, 0), true, 'the session does not carry to Line3');
+  assert.strictEqual(G.isGameOverWithRotate(b, tray, 1), false, 'a stocked Rotate rescues Line3');
+});
+
+test('isGameOverWithRotate: empty tray is never game over', () => {
+  const full = new Int8Array(81).fill(1);
+  assert.strictEqual(G.isGameOverWithRotate(full, [null, null, null], 3), false);
 });
 
 /* ---- Persistence ---- */
@@ -887,6 +956,103 @@ test('simulated turn: detection reads pre-clear snapshot (cross clear)', () => {
   const bonuses = G.iconBonuses(b, units);
   assert.strictEqual(bonuses.length, 2);
   for (const bo of bonuses) assert.strictEqual(bo.points, 100);
+});
+
+/* ---- Freeze stacking ---- */
+
+test('freezeOutcome: not dipped does nothing', () => {
+  const frozen = new Uint8Array(81);
+  const r = G.freezeOutcome(false, false, new Set([1, 2, 3]), frozen);
+  assert.deepStrictEqual(r, { didFreeze: false, frozeNothingNew: false, freezeRefund: false });
+});
+
+test('freezeOutcome: a dip that completes nothing is refunded', () => {
+  const frozen = new Uint8Array(81);
+  const r = G.freezeOutcome(true, false, new Set(), frozen);
+  assert.strictEqual(r.didFreeze, false);
+  assert.strictEqual(r.frozeNothingNew, false);
+  assert.strictEqual(r.freezeRefund, true);
+});
+
+test('freezeOutcome: a dip that completes a unit freezes it, no refund', () => {
+  const frozen = new Uint8Array(81);
+  const r = G.freezeOutcome(true, false, new Set([10, 11]), frozen);
+  assert.strictEqual(r.didFreeze, true);
+  assert.strictEqual(r.frozeNothingNew, false);
+  assert.strictEqual(r.freezeRefund, false);
+});
+
+test('freezeOutcome: stacking a dip that adds a fresh cell keeps the item', () => {
+  const frozen = new Uint8Array(81);
+  frozen[10] = 1;
+  const r = G.freezeOutcome(true, true, new Set([10, 11]), frozen); /* 11 is new */
+  assert.strictEqual(r.didFreeze, true);
+  assert.strictEqual(r.frozeNothingNew, false);
+  assert.strictEqual(r.freezeRefund, false);
+});
+
+test('freezeOutcome: a dip re-finding only frozen cells froze nothing new, refunded', () => {
+  const frozen = new Uint8Array(81);
+  frozen[10] = 1; frozen[11] = 1;
+  const r = G.freezeOutcome(true, true, new Set([10, 11]), frozen);
+  assert.strictEqual(r.didFreeze, true);
+  assert.strictEqual(r.frozeNothingNew, true);
+  assert.strictEqual(r.freezeRefund, true);
+});
+
+test('simulated freeze stacking: a dip stacks onto a held freeze, then one clear melts all', () => {
+  /* Row 4 is already frozen and waiting to melt (freezeHold true). */
+  const b = G.emptyBoard();
+  for (let c = 0; c < 9; c++) b[idx(4, c)] = 1;
+  const frozen = new Uint8Array(81);
+  for (let c = 0; c < 9; c++) frozen[idx(4, c)] = 1;
+  let freezeHold = true;
+
+  /* Fill column 2 except (0,2); (4,2) is already full from the frozen row. */
+  for (const r of [1, 2, 3, 5, 6, 7, 8]) b[idx(r, 2)] = 1;
+
+  /* Dip a single onto (0,2): column 2 completes and crosses the frozen row,
+     so the pre-clear scan re-finds both the still full row 4 and column 2. */
+  G.placePiece(b, G.SHAPES[0], 0, 2, 1);
+  let units = G.scanUnits(b);
+  assert.strictEqual(units.length, 2, 'frozen row 4 and new column 2 both full');
+  let union = G.unionCells(units);
+  assert.strictEqual(union.size, 17, 'two crossing lines share (4,2)');
+
+  let out = G.freezeOutcome(true, freezeHold, union, frozen);
+  assert.strictEqual(out.didFreeze, true, 'the dip freezes the new column');
+  assert.strictEqual(out.frozeNothingNew, false, 'column 2 adds fresh cells (overlap still stacks)');
+  assert.strictEqual(out.freezeRefund, false, 'a real stack keeps the item');
+
+  /* Apply the freeze: mark the whole union, keep the hold. */
+  for (const i of union) frozen[i] = 1;
+  freezeHold = true;
+
+  /* A plain (non-dipped) placement now melts the whole stack as one combo:
+     the frozen cells are still full, so the next scan re-finds both units. */
+  G.placePiece(b, G.SHAPES[0], 8, 8, 1);
+  units = G.scanUnits(b);
+  assert.strictEqual(units.length, 2, 'both frozen lines re-found on the melt turn');
+  out = G.freezeOutcome(false, freezeHold, G.unionCells(units), frozen);
+  assert.strictEqual(out.didFreeze, false, 'a non-dipped placement never freezes');
+  assert.strictEqual(G.clearScore(units.length), 54, 'comboN 2 melt scores as one x2');
+});
+
+test('simulated freeze stacking: a dip far from the frozen row is refunded, stack intact', () => {
+  const b = G.emptyBoard();
+  for (let c = 0; c < 9; c++) b[idx(4, c)] = 1;
+  const frozen = new Uint8Array(81);
+  for (let c = 0; c < 9; c++) frozen[idx(4, c)] = 1;
+
+  /* Dip a single at (0,0): it completes nothing new, but the still full row 4
+     is re-found, so the union is entirely inside the frozen mask. */
+  G.placePiece(b, G.SHAPES[0], 0, 0, 1);
+  const units = G.scanUnits(b);
+  assert.strictEqual(units.length, 1, 'only the frozen row is full');
+  const out = G.freezeOutcome(true, true, G.unionCells(units), frozen);
+  assert.strictEqual(out.didFreeze, true);
+  assert.strictEqual(out.frozeNothingNew, true, 'no fresh cells frozen');
+  assert.strictEqual(out.freezeRefund, true, 'the Freeze is handed back');
 });
 
 /* ---- U pentomino geometry ---- */
