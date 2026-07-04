@@ -24,6 +24,12 @@ in two channels, production and beta (same code, beta is served under a `-beta` 
   Production deploys are separate: merge to `main` and push `origin main`.
 - Bump `APP_BUILD` in `src/logic/config.js` and the `CACHE` version in `sw.js`
   together on every deploy; they are numerically aligned (build 21 = cache v21).
+- **When a Pages deploy fails** (GitHub Pages is occasionally flaky): inspect
+  runs with the GitHub CLI, e.g.
+  `gh run list -R chef55555/lizard-blockdoku-beta --limit 5`. gh lives at
+  `C:\Program Files\GitHub CLI\gh.exe` (call by full path if a stale shell
+  PATH cannot find `gh`). A failed pages-build-deployment run can be
+  re-triggered with an empty commit pushed to the affected repo.
 - No bundler: every new module under `src/` must be added to `ASSETS` in
   `sw.js`, or installed PWAs can load a stale/missing module after an update.
 - Pure game logic lives in `src/logic/*` (re-exported through the barrel
