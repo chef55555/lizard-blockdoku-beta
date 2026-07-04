@@ -543,6 +543,9 @@ await page.waitForSelector('#itemHelp:not([hidden])', { timeout: 6000 });
 check('x3 haul first-earns Rotate', (await page.locator('#itemHelpTitle').textContent()).includes('Rotate'));
 await page.tap('#itemHelpOk');
 await page.waitForTimeout(200);
+check('then first-earns Flip (493 >= 300)', (await page.locator('#itemHelpTitle').textContent()).includes('Flip'));
+await page.tap('#itemHelpOk');
+await page.waitForTimeout(200);
 check('then first-earns Freeze', (await page.locator('#itemHelpTitle').textContent()).includes('Freeze'));
 await page.tap('#itemHelpOk');
 await page.waitForTimeout(200);
@@ -551,6 +554,7 @@ await page.tap('#itemHelpOk');
 await page.waitForTimeout(100);
 check('triple perfect scored 493', (await score()) === 493, 'score=' + (await score()));
 check('rotate stock from 493 points', (await page.locator('#itemRotate .cnt').textContent()) === '2');
+check('flip stock from 493 points', (await page.locator('#itemFlip .cnt').textContent()) === '1');
 check('freeze stock capped at 3', (await page.locator('#itemFreeze .cnt').textContent()) === '3');
 // The x3 combo pays one Reroll, and 3 flower units firing Matching Sets pays another.
 check('reroll stock from the x3 combo and Matching Sets', (await page.locator('#itemReroll .cnt').textContent()) === '2');
@@ -729,27 +733,42 @@ await page.locator('.slot').nth(0).locator('.rot-btn').tap();
 await page.waitForTimeout(300);
 await dragPiece(0, 4, 6);
 await page.waitForTimeout(1000);
+// Flip lesson: the corner piece is backwards; mirror it, then finish the row.
+check('step 7 teaches flip', (await page.locator('#coachText').textContent()).includes('Flip'));
+{
+  // pickup is gated until the piece is mirrored
+  const slotBox = await page.locator('.slot').nth(0).boundingBox();
+  await page.mouse.move(slotBox.x + slotBox.width / 2, slotBox.y + slotBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(slotBox.x + slotBox.width / 2, slotBox.y - 120, { steps: 5 });
+  await page.mouse.up();
+  check('unmirrored piece cannot be picked up', (await page.locator('#ghost[hidden]').count()) === 1);
+}
+await page.locator('.slot').nth(0).locator('.flip-btn').tap();
+await page.waitForTimeout(300);
+await dragPiece(0, 4, 7);
+await page.waitForTimeout(1000);
 // Undo lesson: a forced trap drop, then rewind it.
-check('step 7 baits the undo trap', (await page.locator('#coachText').textContent()).includes('spoils'));
+check('step 8 baits the undo trap', (await page.locator('#coachText').textContent()).includes('spoils'));
 await dragPiece(0, 4, 8); // drop the star: it clears the flower row (an 8-flower bonus = tier-2 party)
 await page.waitForTimeout(1400);
-check('step 8 teaches undo', (await page.locator('#coachText').textContent()).includes('Undo'));
+check('step 9 teaches undo', (await page.locator('#coachText').textContent()).includes('Undo'));
 await page.tap('#itemUndo');
 await page.waitForTimeout(600);
 // Freeze lesson: arm the button, ice the piece, then place it.
-check('step 9 teaches freeze', (await page.locator('#coachText').textContent()).includes('Freeze'));
+check('step 10 teaches freeze', (await page.locator('#coachText').textContent()).includes('Freeze'));
 await page.tap('#itemFreeze');
 await page.locator('.slot').nth(0).tap();
 await page.waitForTimeout(600);
-check('step 10 places the iced piece', (await page.locator('#coachText').textContent()).includes('freezes solid'));
+check('step 11 places the iced piece', (await page.locator('#coachText').textContent()).includes('freezes solid'));
 await dragPiece(0, 4, 8); // the iced piece freezes the row solid
 await page.waitForTimeout(900);
 check('the finished row froze instead of clearing', (await page.locator('.cell.frozen').count()) === 9);
-check('step 11 teaches the melt', (await page.locator('#coachText').textContent()).includes('melts together'));
+check('step 12 teaches the melt', (await page.locator('#coachText').textContent()).includes('melts together'));
 await dragPiece(0, 8, 2); // finish the heart column: everything melts as one combo
 await page.waitForTimeout(1600);
 // Reroll lesson: arm the button, swap the piece.
-check('step 12 teaches reroll', (await page.locator('#coachText').textContent()).includes('Reroll'));
+check('step 13 teaches reroll', (await page.locator('#coachText').textContent()).includes('Reroll'));
 await page.tap('#itemReroll');
 await page.locator('.slot').nth(0).tap();
 await page.waitForTimeout(600);
