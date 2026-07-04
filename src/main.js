@@ -958,6 +958,13 @@ function initUI() {
       spawnParticles(melt.union);
       await wait(reducedMotion ? 160 : CLEAR_WAIT);
       renderBoard();
+      /* A force-melt that RESCUED the game (over fell back to false at the
+         re-test) reads as a surprise board-wipe unless we say what happened.
+         At a true game over the game-over card speaks for itself, so only the
+         rescue is announced. */
+      if (!over && !tutorial) {
+        showToast('melt-toast', '❄️ Board full! Frozen combo melted to save you  +' + melt.gained);
+      }
     }
 
     renderTray();

@@ -480,6 +480,21 @@ header { text-align: center; height: 56px; flex: none; }
 .toast.out { animation: toast-out 450ms ease-in forwards; }
 .toast.out-fast { animation: toast-out 250ms ease-in forwards; }
 
+/* The freeze force-melt rescue toast: an icy tint so the big save reads as a
+   reward instead of a surprise board wipe. */
+.toast.melt-toast {
+  background: linear-gradient(180deg, #E8F4FF, #D6ECFF);
+  border-color: #8FC7F0;
+  color: #1C3D5A;
+  box-shadow: 0 6px 18px rgba(70, 140, 200, 0.32);
+}
+:root[data-theme="dark"] .toast.melt-toast {
+  background: linear-gradient(180deg, #24405C, #1B3247);
+  border-color: #3F6E93;
+  color: #DCEEFF;
+  box-shadow: 0 6px 18px rgba(20, 50, 80, 0.5);
+}
+
 .toast .t-head,
 .bd-entry .t-head {
   font-size: 16px;

@@ -504,6 +504,7 @@ await page.tap('#itemFreeze');
 await page.locator('.slot').nth(0).tap();
 await dragPiece(0, 0, 0); // dipped Diag3 completes box 0 exactly
 await page.waitForSelector('#itemHelp:not([hidden])', { timeout: 6000 });
+check('force-melt shows a rescue toast', (await page.locator('.toast.melt-toast').count()) >= 1);
 check('force-melt earns a freeze (first-earn card)', (await page.locator('#itemHelpTitle').textContent()).includes('Freeze'));
 await page.tap('#itemHelpOk');
 await page.waitForTimeout(100);
