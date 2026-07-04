@@ -6,7 +6,7 @@ import { idb, MIRROR_KEYS, preloadFromIdb, mirrorAllToIdb } from './idb.js';
 
 const {
   PLAYER_NAME, IS_BETA, SAVE_KEY, APP_VERSION, APP_BUILD, LEADERBOARD_URL,
-  LB_KEY, BETA_LB_SUBMITS, ICONS, ICON_LABELS,
+  LB_KEY, BETA_LB_SUBMITS, BETA_STARTER_ITEMS, ICONS, ICON_LABELS,
   LIZARD_ICON, N, CELL_COUNT, SHAPES, emptyBoard, canPlace, fitsSomewhere,
   placePiece, scanUnits, unionCells, clearScore, streakBonus, iconBonusTier,
   iconBonuses, matchingSetsTier, matchingSetBonuses, ITEM_CAPS,
@@ -2373,7 +2373,9 @@ function initUI() {
   function freshGameState() {
     board = emptyBoard();
     score = 0;
-    inv = { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
+    inv = BETA_STARTER_ITEMS
+      ? { rotate: 1, undo: 1, freeze: 1, reroll: 1 }
+      : { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
     progress = { pts: 0, combos: 0, fcombos: 0 };
     frozen = new Uint8Array(CELL_COUNT);
     freezeHold = false;
