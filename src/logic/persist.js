@@ -3,7 +3,7 @@
 import { CELL_COUNT, ICONS } from './config.js';
 import { SHAPES, SHAPE_CLASSES } from './pieces.js';
 import { clearScore } from './scoring.js';
-import { ITEM_CAPS, ROTATION_MAP, FLIP_MAP, SCORE_LOG_MAX, STREAK_LOG_MAX } from './items.js';
+import { ITEM_KEYS, ITEM_CAPS, zeroInv, ROTATION_MAP, FLIP_MAP, SCORE_LOG_MAX, STREAK_LOG_MAX } from './items.js';
 import { cloneScoreLog, cloneStreakLog } from './history.js';
 
 /* ---- Persistence (schema v2; v1 saves migrate) ---- */
@@ -21,7 +21,7 @@ function defaultMeta() {
     nickPrompted: false,
     seenTutorial: false,
     tutorialOffered: false,
-    itemHelp: { rotate: false, flip: false, undo: false, freeze: false, reroll: false },
+    itemHelp: Object.fromEntries(ITEM_KEYS.map((k) => [k, false])),
     /* Beta test-tool switches. null filters mean "no restriction". Production
        never writes or applies these; they still round-trip harmlessly. */
     testTools: { reroll1x1: false, classes: null, icons: null },
@@ -178,6 +178,66 @@ function sanitizeStreakLog(list) {
   return out.slice(-STREAK_LOG_MAX);
 }
 
+/* One tray piece from an untrusted save. Throws on any fault (validateSave's
+   try discards the whole game); a stale-but-harmless flag is scrubbed
+   instead of thrown so a live save keeps working across migrations. This is
+   the block that grows with every new per-piece item flag: keep it here. */
+function validatePiece(p) {
+  if (p === null) return null;
+  if (!p || typeof p !== 'object') throw new Error('bad piece');
+  if (!Number.isInteger(p.shapeId) || p.shapeId < 0 || p.shapeId >= SHAPES.length) throw new Error('bad shape');
+  if (!Number.isInteger(p.icon) || p.icon < 0 || p.icon >= ICONS.length) throw new Error('bad icon');
+  const piece = { shapeId: p.shapeId, icon: p.icon };
+  if (p.frozen === true) piece.frozen = true;
+  else if (p.frozen !== undefined && p.frozen !== false) throw new Error('bad frozen flag');
+  if (p.rotFree === true) {
+    /* rotFree only means something on a shape that can actually rotate; on
+       a symmetric shape it is silently scrubbed (live-save migration). */
+    if (ROTATION_MAP[p.shapeId] !== p.shapeId) piece.rotFree = true;
+  } else if (p.rotFree !== undefined && p.rotFree !== false) {
+    throw new Error('bad rotFree flag');
+  }
+  /* rotOrig is the pre-session orientation remembered for cancel. Accept it
+     only alongside a live rotFree session, only as a real integer in this
+     piece's rotation orbit, and only a DIFFERENT orientation than now.
+     rotOrig without an active session is silently dropped. */
+  if (p.rotOrig !== undefined && piece.rotFree) {
+    if (!Number.isInteger(p.rotOrig) || p.rotOrig < 0 || p.rotOrig >= SHAPES.length) throw new Error('bad rotOrig');
+    if (p.rotOrig === p.shapeId) throw new Error('rotOrig equals shapeId');
+    let x = ROTATION_MAP[p.shapeId];
+    let inOrbit = false;
+    for (let k = 0; k < 4 && x !== p.shapeId; k++) {
+      if (x === p.rotOrig) { inOrbit = true; break; }
+      x = ROTATION_MAP[x];
+    }
+    if (!inOrbit) throw new Error('rotOrig out of orbit');
+    piece.rotOrig = p.rotOrig;
+  }
+  /* Flip session flags mirror the rotate pair. flipFree survives as long
+     as the flip is usable ANYWHERE in the piece's spin orbit: a rotation
+     legitimately parks an open flip session on a mirror-symmetric
+     orientation (T4/T5/U5 orbits mix both kinds), and scrubbing there
+     would delete a paid session on reload. Only a fully mirror-symmetric
+     orbit (lines, squares...) scrubs. flipOrig is accepted only alongside
+     a live session and only as the exact mirror of the current shape
+     (flip is period two, so the orbit is just that pair). */
+  if (p.flipFree === true) {
+    let usable = FLIP_MAP[p.shapeId] !== p.shapeId;
+    for (let x = ROTATION_MAP[p.shapeId]; !usable && x !== p.shapeId; x = ROTATION_MAP[x]) {
+      if (FLIP_MAP[x] !== x) usable = true;
+    }
+    if (usable) piece.flipFree = true;
+  } else if (p.flipFree !== undefined && p.flipFree !== false) {
+    throw new Error('bad flipFree flag');
+  }
+  if (p.flipOrig !== undefined && piece.flipFree) {
+    if (!Number.isInteger(p.flipOrig) || p.flipOrig < 0 || p.flipOrig >= SHAPES.length) throw new Error('bad flipOrig');
+    if (p.flipOrig !== FLIP_MAP[p.shapeId]) throw new Error('flipOrig is not the mirror');
+    piece.flipOrig = p.flipOrig;
+  }
+  return piece;
+}
+
 /* Returns full meta + game|null. On any surprise inside game, discard the
    game but keep the meta. v1 payloads (no v2 fields) migrate to defaults. */
 function validateSave(raw) {
@@ -196,7 +256,7 @@ function validateSave(raw) {
   out.tutorialOffered = raw.tutorialOffered === true;
   const ih = raw.itemHelp;
   if (ih && typeof ih === 'object') {
-    out.itemHelp = { rotate: ih.rotate === true, flip: ih.flip === true, undo: ih.undo === true, freeze: ih.freeze === true, reroll: ih.reroll === true };
+    out.itemHelp = Object.fromEntries(ITEM_KEYS.map((k) => [k, ih[k] === true]));
   }
   /* Beta test tools: reroll1x1 a strict bool; class/icon lists deduped and
      range-checked, with an empty or complete selection collapsing to null
@@ -232,57 +292,11 @@ function validateSave(raw) {
       board[i] = v;
     }
     if (!Array.isArray(g.tray) || g.tray.length !== 3) return out;
-    const tray = g.tray.map((p) => {
-      if (p === null) return null;
-      if (!p || typeof p !== 'object') throw new Error('bad piece');
-      if (!Number.isInteger(p.shapeId) || p.shapeId < 0 || p.shapeId >= SHAPES.length) throw new Error('bad shape');
-      if (!Number.isInteger(p.icon) || p.icon < 0 || p.icon >= ICONS.length) throw new Error('bad icon');
-      const piece = { shapeId: p.shapeId, icon: p.icon };
-      if (p.frozen === true) piece.frozen = true;
-      else if (p.frozen !== undefined && p.frozen !== false) throw new Error('bad frozen flag');
-      if (p.rotFree === true) {
-        /* rotFree only means something on a shape that can actually rotate; on
-           a symmetric shape it is silently scrubbed (live-save migration). */
-        if (ROTATION_MAP[p.shapeId] !== p.shapeId) piece.rotFree = true;
-      } else if (p.rotFree !== undefined && p.rotFree !== false) {
-        throw new Error('bad rotFree flag');
-      }
-      /* rotOrig is the pre-session orientation remembered for cancel. Accept it
-         only alongside a live rotFree session, only as a real integer in this
-         piece's rotation orbit, and only a DIFFERENT orientation than now.
-         rotOrig without an active session is silently dropped. */
-      if (p.rotOrig !== undefined && piece.rotFree) {
-        if (!Number.isInteger(p.rotOrig) || p.rotOrig < 0 || p.rotOrig >= SHAPES.length) throw new Error('bad rotOrig');
-        if (p.rotOrig === p.shapeId) throw new Error('rotOrig equals shapeId');
-        let x = ROTATION_MAP[p.shapeId];
-        let inOrbit = false;
-        for (let k = 0; k < 4 && x !== p.shapeId; k++) {
-          if (x === p.rotOrig) { inOrbit = true; break; }
-          x = ROTATION_MAP[x];
-        }
-        if (!inOrbit) throw new Error('rotOrig out of orbit');
-        piece.rotOrig = p.rotOrig;
-      }
-      /* Flip session flags mirror the rotate pair. flipFree on a
-         mirror-symmetric shape is scrubbed; flipOrig is accepted only
-         alongside a live session and only as the exact mirror of the current
-         shape (flip is period two, so the orbit is just that pair). */
-      if (p.flipFree === true) {
-        if (FLIP_MAP[p.shapeId] !== p.shapeId) piece.flipFree = true;
-      } else if (p.flipFree !== undefined && p.flipFree !== false) {
-        throw new Error('bad flipFree flag');
-      }
-      if (p.flipOrig !== undefined && piece.flipFree) {
-        if (!Number.isInteger(p.flipOrig) || p.flipOrig < 0 || p.flipOrig >= SHAPES.length) throw new Error('bad flipOrig');
-        if (p.flipOrig !== FLIP_MAP[p.shapeId]) throw new Error('flipOrig is not the mirror');
-        piece.flipOrig = p.flipOrig;
-      }
-      return piece;
-    });
+    const tray = g.tray.map(validatePiece);
     if (typeof g.score !== 'number' || !isFinite(g.score) || g.score < 0) return out;
 
     /* v2 fields; absent (v1 game) means defaults */
-    const inv = { rotate: 0, flip: 0, undo: 0, freeze: 0, reroll: 0 };
+    const inv = zeroInv();
     if (g.inv !== undefined) {
       if (!g.inv || typeof g.inv !== 'object') return out;
       for (const k of Object.keys(inv)) {
@@ -309,8 +323,13 @@ function validateSave(raw) {
     }
     const freezeHold = g.freezeHold === true;
     if (freezeHold && frozenMaskToList(frozen).length === 0) return out;
+    /* The engine keeps mask and hold in lockstep; orphan ice without a hold
+       (tampered save) would never melt and would confuse freezeOutcome, so
+       it is scrubbed rather than trusted. */
+    if (!freezeHold) frozen.fill(0);
 
-    const streak = clampInt(g.streak, 0, 999, 0);
+    /* A legit monster streak saturates at the cap instead of resetting. */
+    const streak = Math.min(999, clampInt(g.streak, 0, Number.MAX_SAFE_INTEGER, 0));
     const scoreLog = sanitizeScoreLog(g.scoreLog);
     const streakLog = streak > 0 ? sanitizeStreakLog(g.streakLog) : [];
 

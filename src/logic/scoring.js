@@ -2,7 +2,7 @@
 
 import { N, CELL_COUNT, ICONS, LIZARD_ICON } from './config.js';
 
-/* ---- Board helpers. board = Int8Array(81), -1 empty, 0..4 icon index ---- */
+/* ---- Board helpers. board = Int8Array(81), -1 empty, 0..5 icon index ---- */
 
 function emptyBoard() {
   return new Int8Array(CELL_COUNT).fill(-1);

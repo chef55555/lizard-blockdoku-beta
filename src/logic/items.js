@@ -4,7 +4,13 @@ import { SHAPES, pickShapeId, pickIcon, isRerollForce1x1, nextAllowedShapeId } f
 
 /* ---- Items ---- */
 
+/* The canonical item list, in display order. Every per-item structure
+   (inventories, caps, help flags, buttons) derives from this so adding an
+   item cannot silently miss a site. */
+const ITEM_KEYS = ['rotate', 'flip', 'undo', 'freeze', 'reroll'];
 const ITEM_CAPS = { rotate: 3, flip: 3, undo: 3, freeze: 3, reroll: 3 };
+const zeroInv = () => Object.fromEntries(ITEM_KEYS.map((k) => [k, 0]));
+const fillInv = (n) => Object.fromEntries(ITEM_KEYS.map((k) => [k, n]));
 
 /* History panels: how many recent score/streak entries a game keeps. */
 const SCORE_LOG_MAX = 6;
@@ -24,7 +30,7 @@ function computeEarned(progress, turn) {
     combos: progress.combos,
     fcombos: progress.fcombos || 0,
   };
-  const earned = { rotate: 0, flip: 0, undo: 0, freeze: 0, reroll: 0 };
+  const earned = zeroInv();
   while (p.pts >= 200) { p.pts -= 200; earned.rotate++; }
   while (p.flipPts >= 300) { p.flipPts -= 300; earned.flip++; }
   if (turn.comboN >= 2) { p.combos += 1; p.fcombos += 1; }
@@ -42,7 +48,7 @@ function computeEarned(progress, turn) {
 }
 
 function grantItems(inv, earned) {
-  const granted = { rotate: 0, flip: 0, undo: 0, freeze: 0, reroll: 0 };
+  const granted = zeroInv();
   for (const k of Object.keys(granted)) {
     const have = inv[k] || 0;
     const room = Math.max(0, ITEM_CAPS[k] - have);
@@ -91,90 +97,63 @@ const FLIP_MAP = (() => {
   });
 })();
 
-/* Rotating a tray piece. Pure decision function: given the piece and the
-   current Rotate stock, it returns what tapping the arrow does, or null when
-   the tap can do nothing (no session and no item). One Rotate opens a free
-   spin session (rotFree) and remembers the pre-spin orientation (rotOrig);
-   spinning all the way back to that start cancels the session and refunds the
-   Rotate. Symmetric shapes never charge. Legacy pieces (rotFree without a
-   remembered rotOrig) keep spinning for free but can never cancel: that
-   matches what was already paid, so her live save keeps working.
+/* Transforming a tray piece (Rotate and Flip share one mechanism; they
+   differ only in the orientation map and their field names). Pure decision
+   function: given the piece and the item stock, it returns what tapping the
+   arrow does, or null when the tap can do nothing (no session and no item).
+   One item opens a free session (the cfg.free flag) and remembers the
+   pre-transform orientation (cfg.orig); landing back on that start cancels
+   the session and refunds the item. Shapes the map fixes never charge.
+   Legacy pieces (a free flag without a remembered anchor) keep transforming
+   for free but can never cancel: that matches what was already paid, so her
+   live save keeps working.
 
-   Rotate and Flip sessions coexist on a piece, but each transform breaks the
-   OTHER session's cancel anchor: after a rotation the mirror of `flipOrig` is
-   no longer where the piece stands, and after a flip `rotOrig` has left the
-   piece's spin orbit entirely (an L spins among Ls, never back to a J). So
-   every shape-changing rotation drops flipOrig (keeping flipFree: those free
-   mirrors were paid for), and every shape-changing flip drops rotOrig the
-   same way. Both sessions keep working; only the refunds close. */
-function applyRotation(piece, rotateCount) {
-  const next = ROTATION_MAP[piece.shapeId];
-  /* A shape that maps to itself has no distinct orientation: spin visual only. */
+   The two sessions coexist on a piece, but each shape-changing transform
+   breaks the OTHER session's cancel anchor: after a rotation the mirror of
+   flipOrig is no longer where the piece stands, and after a flip rotOrig has
+   left the piece's spin orbit entirely (an L spins among Ls, never back to a
+   J). So the transform drops cfg.otherOrig while keeping cfg.otherFree
+   (those free transforms were paid for). Both sessions keep working; only
+   the refunds close. */
+const ROT_SESSION = { map: ROTATION_MAP, free: 'rotFree', orig: 'rotOrig', otherFree: 'flipFree', otherOrig: 'flipOrig', cap: ITEM_CAPS.rotate };
+const FLIP_SESSION = { map: FLIP_MAP, free: 'flipFree', orig: 'flipOrig', otherFree: 'rotFree', otherOrig: 'rotOrig', cap: ITEM_CAPS.flip };
+
+function applyTransform(piece, count, cfg) {
+  const next = cfg.map[piece.shapeId];
+  /* A shape that maps to itself has no distinct orientation: visual only. */
   if (next === piece.shapeId) {
-    return { kind: 'symmetric', rotateCount, piece };
+    return { kind: 'symmetric', count, piece };
   }
-  if (piece.rotFree) {
+  if (piece[cfg.free]) {
     /* Landing back on the remembered start cancels the session for a refund. */
-    if (piece.rotOrig !== undefined && next === piece.rotOrig) {
+    if (piece[cfg.orig] !== undefined && next === piece[cfg.orig]) {
       const rebuilt = { shapeId: next, icon: piece.icon };
       if (piece.frozen) rebuilt.frozen = true;
-      if (piece.flipFree) rebuilt.flipFree = true;
-      const refunded = rotateCount < ITEM_CAPS.rotate;
-      return {
-        kind: 'canceled',
-        rotateCount: Math.min(ITEM_CAPS.rotate, rotateCount + 1),
-        piece: rebuilt,
-        refunded,
-      };
+      if (piece[cfg.otherFree]) rebuilt[cfg.otherFree] = true;
+      const refunded = count < cfg.cap;
+      return { kind: 'canceled', count: Math.min(cfg.cap, count + 1), piece: rebuilt, refunded };
     }
-    /* A plain mid-session spin: keep rotFree (and rotOrig, if present). */
-    const spun = { ...piece, shapeId: next };
-    delete spun.flipOrig;
-    return { kind: 'free', rotateCount, piece: spun };
+    /* A plain mid-session move: keep this session's flags as they are. */
+    const moved = { ...piece, shapeId: next };
+    delete moved[cfg.otherOrig];
+    return { kind: 'free', count, piece: moved };
   }
-  /* The first spin of this piece needs a Rotate in stock. */
-  if (rotateCount <= 0) return null;
-  const charged = { shapeId: next, icon: piece.icon, rotFree: true, rotOrig: piece.shapeId };
+  /* The first transform of this piece needs the item in stock. */
+  if (count <= 0) return null;
+  const charged = { shapeId: next, icon: piece.icon, [cfg.free]: true, [cfg.orig]: piece.shapeId };
   if (piece.frozen) charged.frozen = true;
-  if (piece.flipFree) charged.flipFree = true;
-  return { kind: 'charged', rotateCount: rotateCount - 1, piece: charged };
+  if (piece[cfg.otherFree]) charged[cfg.otherFree] = true;
+  return { kind: 'charged', count: count - 1, piece: charged };
 }
 
-/* Flipping a tray piece: the mirror twin of applyRotation, with the same
-   session model (flipFree/flipOrig) and the same refund-on-return rule. Flip
-   is period two, so a fresh session is at most two taps: the first mirrors
-   (charged), the second lands back on flipOrig and cancels for a refund. A
-   flipFree piece whose flipOrig was dropped by a rotation keeps mirroring for
-   free but can never cancel. Mirror-symmetric shapes never charge. */
-function applyFlip(piece, flipCount) {
-  const next = FLIP_MAP[piece.shapeId];
-  if (next === piece.shapeId) {
-    return { kind: 'symmetric', flipCount, piece };
-  }
-  if (piece.flipFree) {
-    if (piece.flipOrig !== undefined && next === piece.flipOrig) {
-      const rebuilt = { shapeId: next, icon: piece.icon };
-      if (piece.frozen) rebuilt.frozen = true;
-      if (piece.rotFree) rebuilt.rotFree = true;
-      const refunded = flipCount < ITEM_CAPS.flip;
-      return {
-        kind: 'canceled',
-        flipCount: Math.min(ITEM_CAPS.flip, flipCount + 1),
-        piece: rebuilt,
-        refunded,
-      };
-    }
-    const mirrored = { ...piece, shapeId: next };
-    delete mirrored.rotOrig;
-    return { kind: 'free', flipCount, piece: mirrored };
-  }
-  /* The first mirror of this piece needs a Flip in stock. */
-  if (flipCount <= 0) return null;
-  const charged = { shapeId: next, icon: piece.icon, flipFree: true, flipOrig: piece.shapeId };
-  if (piece.frozen) charged.frozen = true;
-  if (piece.rotFree) charged.rotFree = true;
-  return { kind: 'charged', flipCount: flipCount - 1, piece: charged };
+/* Public wrappers keep the historic result field names. */
+function renameCount(res, key) {
+  if (!res) return null;
+  const { count, ...rest } = res;
+  return { ...rest, [key]: count };
 }
+const applyRotation = (piece, rotateCount) => renameCount(applyTransform(piece, rotateCount, ROT_SESSION), 'rotateCount');
+const applyFlip = (piece, flipCount) => renameCount(applyTransform(piece, flipCount, FLIP_SESSION), 'flipCount');
 
 /* Reroll: swap a tray piece for a fresh one of a DIFFERENT shape (icon from the
    same pool). The guard avoids handing back the identical shape; if the rng is
@@ -230,4 +209,4 @@ function freezeOutcome(dipped, freezeHold, union, frozen) {
   return { didFreeze, frozeNothingNew, freezeRefund: dipped && !didFreeze };
 }
 
-export { ITEM_CAPS, SCORE_LOG_MAX, STREAK_LOG_MAX, computeEarned, grantItems, rotateShapeCells, flipShapeCells, shapeKeyOf, ROTATION_MAP, FLIP_MAP, applyRotation, applyFlip, rerollPiece, applyReroll, freezeOutcome };
+export { ITEM_KEYS, ITEM_CAPS, zeroInv, fillInv, SCORE_LOG_MAX, STREAK_LOG_MAX, computeEarned, grantItems, rotateShapeCells, flipShapeCells, shapeKeyOf, ROTATION_MAP, FLIP_MAP, applyRotation, applyFlip, rerollPiece, applyReroll, freezeOutcome };

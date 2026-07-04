@@ -3,6 +3,8 @@
 /* Node test suite for the pure game logic in src/logic. Run: node tests/logic.test.js */
 
 import assert from 'node:assert';
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import * as G from '../src/logic/index.js';
 
 let passed = 0;
@@ -533,6 +535,12 @@ test('validateSave: hostile v2 fields', () => {
   const holdNoFrozen = G.validateSave({ ...base, game: { ...base.game, freezeHold: true } });
   assert.strictEqual(holdNoFrozen.game, null, 'freezeHold without frozen cells rejected');
 
+  /* The converse: ice without a hold is orphaned (unreachable in play) and
+     would never melt, so the mask is scrubbed while the game survives. */
+  const iceNoHold = G.validateSave({ ...base, game: { ...base.game, frozen: [4, 5] } });
+  assert.ok(iceNoHold.game, 'orphan ice keeps the game');
+  assert.strictEqual(Array.from(iceNoHold.game.frozen).reduce((a, x) => a + x, 0), 0, 'orphan ice scrubbed');
+
   const badTheme = G.validateSave({ v: 2, best: 1, theme: 'neon', volume: 400, game: null });
   assert.strictEqual(badTheme.theme, 'auto');
   assert.strictEqual(badTheme.volume, 50);
@@ -813,7 +821,7 @@ test('validateSave: v1 game defaults streak to 0', () => {
   assert.strictEqual(out.game.streak, 0, 'absent streak defaults to 0');
 });
 
-test('validateSave: hostile streak values fall back to 0', () => {
+test('validateSave: hostile streak values fall back to 0, big ones saturate', () => {
   const filled = new Array(81).fill(1);
   const mk = (streak) => G.validateSave({
     v: 2, best: 1,
@@ -822,7 +830,8 @@ test('validateSave: hostile streak values fall back to 0', () => {
   assert.strictEqual(mk(-1), 0, 'negative rejected');
   assert.strictEqual(mk(3.5), 0, 'fractional rejected');
   assert.strictEqual(mk('7'), 0, 'string rejected');
-  assert.strictEqual(mk(1e9), 0, 'huge rejected');
+  assert.strictEqual(mk(1e9), 999, 'a huge integer streak saturates at the cap, never resets');
+  assert.strictEqual(mk(1000), 999, 'just over the cap saturates too');
   assert.strictEqual(mk(4), 4, 'a sane streak survives');
 });
 
@@ -1456,7 +1465,17 @@ test('validateSave: flip session flags accepted, hostile values rejected, symmet
 
   const scrub = mk({ shapeId: 5, icon: 2, flipFree: true });
   assert.ok(scrub.game, 'mirror-symmetric flipFree keeps the game');
-  assert.deepStrictEqual(scrub.game.tray[0], { shapeId: 5, icon: 2 }, 'flipFree scrubbed off a symmetric shape');
+  assert.deepStrictEqual(scrub.game.tray[0], { shapeId: 5, icon: 2 }, 'flipFree scrubbed off a fully symmetric orbit');
+
+  /* A rotation can park an open flip session on a mirror-symmetric
+     orientation (T4 28 is FLIP-fixed but its orbit holds chiral 30/31).
+     The session must survive the round-trip: scrubbing it would delete a
+     paid Flip on reload. */
+  const parked = mk({ shapeId: 28, icon: 3, rotFree: true, rotOrig: 31, flipFree: true });
+  assert.ok(parked.game, 'parked flip session keeps the game');
+  assert.deepStrictEqual(parked.game.tray[0],
+    { shapeId: 28, icon: 3, rotFree: true, rotOrig: 31, flipFree: true },
+    'flipFree survives on a flip-fixed shape whose spin orbit is chiral');
 
   const mkProgress = (flipPts) => G.validateSave({
     v: 2, best: 1,
@@ -1731,6 +1750,27 @@ test('scenarios: nearGameOver is alive before the move, dead after, items rescue
   assert.strictEqual(G.isGameOverWithRotate(st.board, after, 3, 3), true, 'no spin or mirror rescues a Line5');
   assert.strictEqual(G.isGameOverWithItems(st.board, after, st.inv.rotate, st.inv.reroll, st.inv.flip), false,
     'a held Reroll keeps the game alive');
+});
+
+/* ---- Deploy invariants. No bundler: an update only reaches installed
+   phones if the service worker precaches every module and its cache name
+   was bumped in lockstep with the build number. Forgetting either breaks
+   the PWA silently, so the suite enforces both. ---- */
+
+test('deploy: every src module is in sw.js ASSETS and the cache matches the build', () => {
+  const root = new URL('..', import.meta.url);
+  const sw = readFileSync(new URL('sw.js', root), 'utf8');
+  const srcDir = fileURLToPath(new URL('src/', root));
+  const modules = readdirSync(srcDir, { recursive: true })
+    .map(String)
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => './src/' + f.replace(/\\/g, '/'));
+  assert.ok(modules.length >= 10, 'src module sweep found the expected modules');
+  for (const m of modules) {
+    assert.ok(sw.includes("'" + m + "'"), m + ' must be listed in sw.js ASSETS');
+  }
+  const cacheVer = Number((sw.match(/-v(\d+)'/) || [])[1]);
+  assert.strictEqual(cacheVer, G.APP_BUILD, 'sw.js CACHE version must equal APP_BUILD');
 });
 
 /* ---- Report ---- */

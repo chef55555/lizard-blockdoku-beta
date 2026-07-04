@@ -9,8 +9,8 @@ const {
   PLAYER_NAME, IS_BETA, SAVE_KEY, APP_VERSION, APP_BUILD, LEADERBOARD_URL,
   LB_KEY, BETA_LB_SUBMITS, BETA_STARTER_ITEMS, ICONS, ICON_LABELS,
   LIZARD_ICON, N, CELL_COUNT, SHAPES, emptyBoard, canPlace, fitsSomewhere,
-  placePiece, scanUnits, unionCells, clearScore, streakBonus, iconBonusTier,
-  iconBonuses, matchingSetsTier, matchingSetBonuses, ITEM_CAPS,
+  placePiece, scanUnits, unionCells, clearScore, streakBonus,
+  iconBonuses, matchingSetBonuses, ITEM_CAPS,
   SCORE_LOG_MAX, STREAK_LOG_MAX, computeEarned, grantItems, ROTATION_MAP,
   FLIP_MAP, applyRotation, applyFlip, applyReroll, freezeOutcome, boardToLogString,
   makeScoreLogEntry, pushLog, takeSnapshot, genTray, isGameOver,
@@ -18,7 +18,7 @@ const {
   encodeGame, sanitizeNickname, validateSave,
   SCENARIOS, buildScenario, SHAPE_CLASS_META,
   setShapeClassFilter, setIconFilter, setRerollForce1x1,
-  JOURNAL_MAX,
+  JOURNAL_MAX, zeroInv, fillInv,
 } = L;
 
 /* ================================================================
@@ -80,7 +80,7 @@ function initUI() {
   let tray = [null, null, null];
   let score = 0;
   let best = 0;
-  let inv = { rotate: 0, flip: 0, undo: 0, freeze: 0, reroll: 0 };
+  let inv = zeroInv();
   let progress = { pts: 0, flipPts: 0, combos: 0, fcombos: 0 };
   let frozen = new Uint8Array(CELL_COUNT);
   let freezeHold = false;
@@ -329,104 +329,68 @@ function initUI() {
       const piece = tray[i];
       if (!piece) return;
       slot.appendChild(buildPieceEl(piece, '--tray-cell'));
-      /* Symmetric shapes have nothing to rotate, so they never show the arrow. */
+      /* Symmetric shapes have nothing to transform, so no arrow. When a
+         transform is the only move left, the arrow pulses to point the way. */
       if ((inv.rotate > 0 || piece.rotFree) && ROTATION_MAP[piece.shapeId] !== piece.shapeId) {
-        /* When rotation is the only move left, the arrow pulses to point the way. */
         const rescue = plainStuck && rotationRescues(board, piece, inv.rotate);
-        slot.appendChild(buildRotBtn(i, piece.rotFree, rescue));
+        slot.appendChild(buildXformBtn(i, 'rotate', piece.rotFree, rescue));
       }
-      /* Mirror-symmetric shapes have nothing to flip, so no mirror button. */
       if ((inv.flip > 0 || piece.flipFree) && FLIP_MAP[piece.shapeId] !== piece.shapeId) {
         const rescue = plainStuck && flipRescues(board, piece, inv.flip);
-        slot.appendChild(buildFlipBtn(i, piece.flipFree, rescue));
+        slot.appendChild(buildXformBtn(i, 'flip', piece.flipFree, rescue));
       }
       if (!fits[i]) slot.classList.add('dead');
     });
   }
 
-  /* Per-slot rotate button. Its pointerdown never reaches the slot, so
+  /* The two transform items share one per-slot button and tap flow; they
+     differ only in glyph, animation, and which session they drive. */
+  const XFORM = {
+    rotate: { btnClass: 'rot-btn', glyph: '⟳', anim: 'spin', invKey: 'rotate', apply: applyRotation, countKey: 'rotateCount', label: 'Rotate' },
+    flip: { btnClass: 'flip-btn', glyph: '⇄', anim: 'mirror', invKey: 'flip', apply: applyFlip, countKey: 'flipCount', label: 'Flip' },
+  };
+
+  /* Per-slot transform button. Its pointerdown never reaches the slot, so
      tapping it can never begin a drag. */
-  function buildRotBtn(i, free, rescue) {
+  function buildXformBtn(i, kind, free, rescue) {
+    const cfg = XFORM[kind];
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'rot-btn' + (free ? ' free' : '') + (rescue ? ' rescue' : '');
-    b.textContent = '⟳';
-    b.setAttribute('aria-label', free ? 'Rotate this piece (free)' : 'Rotate this piece');
+    b.className = cfg.btnClass + (free ? ' free' : '') + (rescue ? ' rescue' : '');
+    b.textContent = cfg.glyph;
+    b.setAttribute('aria-label', cfg.label + ' this piece' + (free ? ' (free)' : ''));
     b.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); });
-    b.addEventListener('pointerup', (e) => { e.stopPropagation(); rotateSlot(i); });
+    b.addEventListener('pointerup', (e) => { e.stopPropagation(); transformSlot(i, kind); });
     return b;
   }
 
-  /* Per-slot flip button: the rotate arrow's mirror twin, in the other corner. */
-  function buildFlipBtn(i, free, rescue) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'flip-btn' + (free ? ' free' : '') + (rescue ? ' rescue' : '');
-    b.textContent = '⇄';
-    b.setAttribute('aria-label', free ? 'Flip this piece (free)' : 'Flip this piece');
-    b.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); });
-    b.addEventListener('pointerup', (e) => { e.stopPropagation(); flipSlot(i); });
-    return b;
-  }
-
-  /* One Rotate buys unlimited spins of that piece until it is placed; spinning
-     it all the way back to the start cancels the session and refunds the item.
-     The flags ride on the piece, so they survive saves and undo. */
-  function rotateSlot(i) {
+  /* One item buys unlimited transforms of that piece until it is placed;
+     taking it all the way back to the start cancels the session and refunds
+     the item. The flags ride on the piece, so they survive saves and undo. */
+  function transformSlot(i, kind) {
     if (state !== 'IDLE') return;
+    const cfg = XFORM[kind];
     const piece = tray[i];
     if (!piece) return;
-    const res = applyRotation(piece, inv.rotate);
+    const res = cfg.apply(piece, inv[cfg.invKey]);
     if (!res) return;
     sound.rotate();
     if (res.kind === 'symmetric') {
-      /* Nothing to rotate; just a playful little spin, no state change. */
+      /* Nothing to transform; just a playful little wiggle, no state change. */
       const el = slotEls[i].querySelector('.piece');
-      if (el && !reducedMotion) { el.classList.remove('spin'); void el.offsetWidth; el.classList.add('spin'); }
+      if (el && !reducedMotion) { el.classList.remove(cfg.anim); void el.offsetWidth; el.classList.add(cfg.anim); }
       return;
     }
-    inv.rotate = res.rotateCount;
+    inv[cfg.invKey] = res[cfg.countKey];
     tray[i] = res.piece;
-    logAction('rotate s' + i + ' #' + piece.shapeId + '->' + res.piece.shapeId + ' ' + res.kind);
+    logAction(kind + ' s' + i + ' #' + piece.shapeId + '->' + res.piece.shapeId + ' ' + res.kind);
     if (res.kind === 'canceled') {
-      showToast('item-toast', res.refunded
-        ? '⟳ Back where it started, Rotate returned!'
-        : '⟳ Back where it started!');
+      showToast('item-toast', cfg.glyph + ' Back where it started' + (res.refunded ? ', ' + cfg.label + ' returned!' : '!'));
     }
     renderTray();
     updateItemsBar();
     const el = slotEls[i].querySelector('.piece');
-    if (el && !reducedMotion) el.classList.add('spin');
-    persist();
-  }
-
-  /* One Flip mirrors that piece until it is placed; flipping it back to the
-     start cancels the session and refunds the item. Mirrors rotateSlot. */
-  function flipSlot(i) {
-    if (state !== 'IDLE') return;
-    const piece = tray[i];
-    if (!piece) return;
-    const res = applyFlip(piece, inv.flip);
-    if (!res) return;
-    sound.rotate();
-    if (res.kind === 'symmetric') {
-      /* Nothing to mirror; just a playful little sway, no state change. */
-      const el = slotEls[i].querySelector('.piece');
-      if (el && !reducedMotion) { el.classList.remove('mirror'); void el.offsetWidth; el.classList.add('mirror'); }
-      return;
-    }
-    inv.flip = res.flipCount;
-    tray[i] = res.piece;
-    logAction('flip s' + i + ' #' + piece.shapeId + '->' + res.piece.shapeId + ' ' + res.kind);
-    if (res.kind === 'canceled') {
-      showToast('item-toast', res.refunded
-        ? '⇄ Back where it started, Flip returned!'
-        : '⇄ Back where it started!');
-    }
-    renderTray();
-    updateItemsBar();
-    const el = slotEls[i].querySelector('.piece');
-    if (el && !reducedMotion) el.classList.add('mirror');
+    if (el && !reducedMotion) el.classList.add(cfg.anim);
     persist();
   }
 
@@ -645,18 +609,21 @@ function initUI() {
       cell.firstChild.textContent = ICONS[drag.piece.icon];
       drag.previewCells.push(idx);
     }
-    /* Will-clear glow: simulate the placement and reuse the unit scan. */
+    /* Will-clear glow: simulate the placement and reuse the unit scan. A
+       DIPPED piece freezes what it completes instead of clearing it, so its
+       preview goes icy and shows no bonus rings (bonuses pay at the melt). */
     const sim = new Int8Array(board);
     for (const [dr, dc] of drag.shape.cells) sim[(row + dr) * N + col + dc] = drag.piece.icon;
     const units = scanUnits(sim);
+    const unitClass = drag.piece.frozen ? 'will-freeze' : 'will-clear';
     for (const u of units) {
       for (const idx of u.cells) {
-        cellEls[idx].classList.add('will-clear');
+        cellEls[idx].classList.add(unitClass);
         drag.willClearCells.push(idx);
       }
     }
     /* Gold ring on the cells that would pay an icon bonus */
-    if (units.length) {
+    if (units.length && !drag.piece.frozen) {
       for (const b of iconBonuses(sim, units)) {
         for (const idx of b.cells) {
           cellEls[idx].classList.add('will-bonus');
@@ -672,7 +639,7 @@ function initUI() {
       cell.classList.remove('preview');
       if (board[idx] === -1) cell.firstChild.textContent = '';
     }
-    for (const idx of drag.willClearCells) cellEls[idx].classList.remove('will-clear');
+    for (const idx of drag.willClearCells) cellEls[idx].classList.remove('will-clear', 'will-freeze');
     for (const idx of drag.willBonusCells) cellEls[idx].classList.remove('will-bonus');
     drag.previewCells = [];
     drag.willClearCells = [];
@@ -918,8 +885,11 @@ function initUI() {
       sound.freeze();
       /* A dip that added new frozen cells on top of a waiting freeze stacked
          it deeper; a dip that re-found only already-frozen cells said nothing
-         new (its refund toast fires below instead). */
-      if (stacked) {
+         new (its refund toast fires below instead). A freeze that instantly
+         force-melted at game over gets no promise it cannot keep. */
+      if (melt) {
+        /* the force-melt block below owns the messaging */
+      } else if (stacked) {
         showToast('item-toast', '❄️ Frozen deeper! Your next clear melts it all');
       } else if (!frozeNothingNew) {
         showToast('item-toast', '❄️ Frozen! Finish another set to melt a big combo');
@@ -1007,6 +977,7 @@ function initUI() {
         let hint = '\u{1F3B2} Stuck? A Reroll can still save you!';
         if (!isGameOverWithRotate(board, tray, inv.rotate)) hint = '⟳ Stuck? Rotating a piece can still save you!';
         else if (!isGameOverWithRotate(board, tray, 0, inv.flip)) hint = '⇄ Stuck? Flipping a piece can still save you!';
+        else if (!isGameOverWithRotate(board, tray, inv.rotate, inv.flip)) hint = '⟳⇄ Stuck? Rotate and Flip together can still save you!';
         showToast('item-toast', hint);
       }
       /* The tutorial teaches items hands-on; its crafted melt can earn a
@@ -1640,6 +1611,8 @@ function initUI() {
   function doUndo() {
     if (!undoSnapshot || inv.undo <= 0) return;
     if (state !== 'IDLE' && state !== 'GAME_OVER') return;
+    setArming(false);
+    setRerollArming(false);
     const snap = undoSnapshot;
     undoSnapshot = null;
     board = snap.board;
@@ -1860,7 +1833,7 @@ function initUI() {
         board = emptyBoard();
         [3, 1, 4, 2, 3, 1].forEach((icon, c) => { board[4 * N + c] = icon; });
         board[5 * N + 6] = 2; /* blocks the unrotated drop */
-        inv = { rotate: 1, flip: 0, undo: 0, freeze: 0, reroll: 0 };
+        inv = { ...zeroInv(), rotate: 1 };
         tray = [{ shapeId: 6, icon: 4 }, null, null];
       },
       anchor: () => slotEls[0],
@@ -1875,7 +1848,7 @@ function initUI() {
         board = emptyBoard();
         [2, 4, 1, 3, 2, 4, 1].forEach((icon, c) => { board[5 * N + c] = icon; });
         board[4 * N + 7] = 3; /* blocks the unmirrored corner */
-        inv = { rotate: 0, flip: 1, undo: 0, freeze: 0, reroll: 0 };
+        inv = { ...zeroInv(), flip: 1 };
         tray = [{ shapeId: 9, icon: 2 }, null, null]; /* corner; its mirror is shape 12 */
       },
       anchor: () => slotEls[0],
@@ -1889,7 +1862,7 @@ function initUI() {
       setup() {
         board = emptyBoard();
         for (let c = 0; c < 8; c++) board[4 * N + c] = 1; /* flowers cols 0-7 */
-        inv = { rotate: 0, flip: 0, undo: 1, freeze: 0, reroll: 0 };
+        inv = { ...zeroInv(), undo: 1 };
         tray = [{ shapeId: 0, icon: 3 }, null, null]; /* star single */
       },
       anchor: () => cellEls[4 * N + 8],
@@ -1901,7 +1874,7 @@ function initUI() {
       text: 'Regrets? Tap ↩️ Undo and the whole move rewinds!',
       setup() {
         board = emptyBoard();
-        inv = { rotate: 0, flip: 0, undo: 1, freeze: 0, reroll: 0 };
+        inv = { ...zeroInv(), undo: 1 };
         tray = [null, null, null];
       },
       anchor: () => $('itemUndo'),
@@ -1913,7 +1886,7 @@ function initUI() {
       setup() {
         board = emptyBoard();
         for (let c = 0; c < 8; c++) board[4 * N + c] = 1; /* flowers cols 0-7 */
-        inv = { rotate: 0, flip: 0, undo: 0, freeze: 1, reroll: 0 };
+        inv = { ...zeroInv(), freeze: 1 };
         tray = [{ shapeId: 0, icon: 1 }, null, null]; /* flower single */
       },
       anchor: () => $('itemFreeze'),
@@ -1950,7 +1923,7 @@ function initUI() {
       text: '\u{1F3B2} A piece you do not like? Tap \u{1F3B2} Reroll, then tap the piece to swap it!',
       setup() {
         board = emptyBoard();
-        inv = { rotate: 0, flip: 0, undo: 0, freeze: 0, reroll: 1 };
+        inv = { ...zeroInv(), reroll: 1 };
         tray = [{ shapeId: 38, icon: 4 }, null, null]; /* Plus5 */
       },
       anchor: () => $('itemReroll'),
@@ -1985,6 +1958,8 @@ function initUI() {
 
   function endTutorial() {
     if (!tutorial) return;
+    setArming(false);
+    setRerollArming(false);
     const s = tutorial.stash;
     tutorial = null;
     board = s.board;
@@ -2019,8 +1994,8 @@ function initUI() {
     tutorial.step++;
     if (tutorial.step >= TUT.length) { endTutorial(); return; }
     const s = TUT[tutorial.step];
-    inv = { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
-    progress = { pts: 0, combos: 0, fcombos: 0 };
+    inv = zeroInv();
+    progress = { pts: 0, flipPts: 0, combos: 0, fcombos: 0 };
     frozen = new Uint8Array(CELL_COUNT);
     freezeHold = false;
     streak = 0;
@@ -2323,6 +2298,8 @@ function initUI() {
     freshGameState();
     logAction('new game');
     undoSnapshot = null;
+    setArming(false);
+    setRerollArming(false);
     renderBoard();
     renderTray();
     updateItemsBar();
@@ -2425,6 +2402,8 @@ function initUI() {
   $('settingsBtn').addEventListener('click', () => {
     if (state !== 'IDLE' || tutorial) return;
     sound.tap();
+    setArming(false);
+    setRerollArming(false);
     syncSettingsUI();
     settingsEl.hidden = false;
   });
@@ -2555,9 +2534,7 @@ function initUI() {
   function freshGameState() {
     board = emptyBoard();
     score = 0;
-    inv = BETA_STARTER_ITEMS
-      ? { rotate: 1, flip: 1, undo: 1, freeze: 1, reroll: 1 }
-      : { rotate: 0, flip: 0, undo: 0, freeze: 0, reroll: 0 };
+    inv = BETA_STARTER_ITEMS ? fillInv(1) : zeroInv();
     progress = { pts: 0, flipPts: 0, combos: 0, fcombos: 0 };
     frozen = new Uint8Array(CELL_COUNT);
     freezeHold = false;
@@ -2822,7 +2799,14 @@ function initUI() {
       updateStreakPill(false);
       persist();
       testToolsEl.hidden = true;
-      showToast('item-toast', '\u{1F41E} State loaded');
+      /* A dead-end import (game over, no rescuing items) renders fine for
+         inspection, but persist() nulls finished games, so a reload will
+         discard it. Say so up front instead of letting it vanish quietly. */
+      if (isGameOver(board, tray) && isGameOverWithItems(board, tray, inv.rotate, inv.reroll, inv.flip)) {
+        showToast('item-toast', '\u{1F41E} Loaded a dead-end state: look now, it will not survive a reload');
+      } else {
+        showToast('item-toast', '\u{1F41E} State loaded');
+      }
     }
     $('bugLoad').addEventListener('click', () => { sound.tap(); loadFromPaste('game'); });
     $('bugLoadBefore').addEventListener('click', () => { sound.tap(); loadFromPaste('before'); });

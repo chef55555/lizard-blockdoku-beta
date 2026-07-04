@@ -105,7 +105,7 @@ check('beta fresh game starts with one of each item', (await cnt('itemFlip')) ==
 console.log('2. Test panel opens from Settings (beta only)');
 await page.tap('#settingsBtn');
 await page.waitForSelector('#settings:not([hidden])');
-check('version line says beta build 23', (await page.locator('#versionLine').textContent()).includes('build 23, beta'));
+check('version line says beta build 24', (await page.locator('#versionLine').textContent()).includes('build 24, beta'));
 check('test-scenarios button is visible', await page.locator('#testToolsBtn').isVisible());
 await page.tap('#testToolsBtn');
 await page.waitForSelector('#testTools:not([hidden])');
@@ -140,7 +140,22 @@ await page.tap('#itemFreeze');
 await page.locator('.slot').nth(0).tap(); // dip the single
 await page.waitForTimeout(300);
 check('dip consumed a freeze', (await cnt('itemFreeze')) === '2');
-await dragPiece(0, 4, 8); // dipped single completes the row: it freezes
+// Hover before dropping: a dipped piece must preview an icy freeze, never
+// the purple will-clear promise or gold bonus rings it cannot keep.
+{
+  const { boardLeft, boardTop, cell } = await getGeometry();
+  const box = await page.locator('.slot').nth(0).boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(350);
+  const ghostBox = await page.locator('#ghost .piece').boundingBox();
+  await page.mouse.move(boardLeft + 8 * cell + ghostBox.width / 2, boardTop + 4 * cell + ghostBox.height + 70, { steps: 12 });
+  await page.waitForTimeout(200);
+  check('dipped piece previews an icy freeze', (await page.locator('.cell.will-freeze').count()) === 9);
+  check('dipped preview shows no purple clear promise', (await page.locator('.cell.will-clear').count()) === 0);
+  check('dipped preview shows no gold bonus rings', (await page.locator('.cell.will-bonus').count()) === 0);
+  await page.mouse.up(); // dipped single completes the row: it freezes
+}
 await page.waitForTimeout(900);
 await dismissItemHelpCards();
 check('completed row froze instead of clearing', (await page.locator('.cell.frozen').count()) === 9);
@@ -262,7 +277,7 @@ let report = null;
 try { report = JSON.parse(reportText); } catch (err) { /* checked below */ }
 check('capture fills the box with a parseable report', !!report);
 check('report identifies itself and the build',
-  report && report.type === 'lizard-blockdoku-bug-report' && report.build === 23 && report.channel === 'beta');
+  report && report.type === 'lizard-blockdoku-bug-report' && report.build === 24 && report.channel === 'beta');
 check('report journal traces the scenario and the placement',
   report && Array.isArray(report.journal)
   && report.journal.some((l) => l.includes('scenario perfect1'))

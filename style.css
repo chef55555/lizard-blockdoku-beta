@@ -360,6 +360,16 @@ header { text-align: center; height: 56px; flex: none; }
   to   { box-shadow: inset 0 0 0 3px rgba(255, 194, 75, 1); }
 }
 
+/* A dipped piece freezes what it finishes: its preview pulses icy blue,
+   matching the frozen-cell glaze, so the purple "will clear" promise is
+   never shown for a set that will actually wait on ice. */
+.cell.will-freeze { animation: prefreeze-pulse 700ms ease-in-out infinite alternate; }
+.cell.filled.will-freeze { animation: prefreeze-pulse 700ms ease-in-out infinite alternate; }
+@keyframes prefreeze-pulse {
+  from { box-shadow: inset 0 0 0 999px rgba(124, 192, 242, 0.3); }
+  to   { box-shadow: inset 0 0 0 999px rgba(124, 192, 242, 0.65); }
+}
+
 /* Frozen cells: icy glaze over the normal block, icon kept underneath */
 .cell.frozen::after {
   content: '❄';
@@ -1411,6 +1421,10 @@ header { text-align: center; height: 56px; flex: none; }
   .cell.will-bonus {
     animation: none;
     box-shadow: inset 0 0 0 3px rgba(255, 194, 75, 0.8);
+  }
+  .cell.will-freeze, .cell.filled.will-freeze {
+    animation: none;
+    box-shadow: inset 0 0 0 999px rgba(124, 192, 242, 0.5);
   }
   .cell.frozen::after { animation: none; }
   .item-btn.armed { animation: none; }
