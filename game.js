@@ -32,15 +32,15 @@ const LB_KEY = 'lizard-blockdoku-lb';
    to verify the live pipeline end to end). */
 const BETA_LB_SUBMITS = false;
 
-const ICONS = ['\u{1F98E}', '\u{1F338}', '\u{1F49C}', '⭐', '\u{1F353}']; /* lizard flower heart star berry */
-const ICON_WEIGHTS = [8, 23, 23, 23, 23];
-const ICON_LABELS = ['Lizard Power!', 'Flower Match!', 'Heart Match!', 'Star Match!', 'Berry Match!'];
+const ICONS = ['\u{1F98E}', '\u{1F338}', '\u{1F49C}', '⭐', '\u{1F353}', '\u{1F98B}']; /* lizard flower heart star berry butterfly */
+const ICON_WEIGHTS = [8, 23, 23, 23, 23, 23];
+const ICON_LABELS = ['Lizard Power!', 'Flower Match!', 'Heart Match!', 'Star Match!', 'Berry Match!', 'Butterfly Match!'];
 const LIZARD_ICON = 0;
 
 const N = 9;
 const CELL_COUNT = 81;
 
-/* ---- Piece set: 43 shapes in 15 weighted classes (weights sum 100).
+/* ---- Piece set: 47 shapes in 16 weighted classes (weights sum 106).
    A class's weight is split evenly among its orientations. Never rotated. ---- */
 const SHAPE_CLASSES = [
   { w: 4,  shapes: [[[0,0]]] },                                                     /* Single */
@@ -71,6 +71,11 @@ const SHAPE_CLASSES = [
   { w: 3,  shapes: [                                                                 /* T5 */
       [[0,0],[0,1],[0,2],[1,1],[2,1]], [[0,1],[1,1],[2,0],[2,1],[2,2]],
       [[0,0],[1,0],[1,1],[1,2],[2,0]], [[0,2],[1,0],[1,1],[1,2],[2,2]] ] },
+  { w: 6,  shapes: [                                                                 /* U5 */
+      [[0,0],[0,2],[1,0],[1,1],[1,2]],
+      [[0,0],[0,1],[1,1],[2,0],[2,1]],
+      [[0,0],[0,1],[0,2],[1,0],[1,2]],
+      [[0,0],[0,1],[1,0],[2,0],[2,1]] ] },
 ];
 
 const SHAPES = [];
@@ -172,9 +177,9 @@ function clearScore(n) {
 }
 
 /* Streak: clearing something on back-to-back placements pays a rising bonus.
-   x2 +25, x3 +50, x4 +75... One tunable, chunky on purpose. */
+   x2 +10, x3 +20, x4 +30... Uncapped. One tunable, chunky on purpose. */
 function streakBonus(k) {
-  return k >= 2 ? 25 * (k - 1) : 0;
+  return k >= 2 ? 10 * (k - 1) : 0;
 }
 
 /* Icon bonus per (unit, icon) pair, counted on the pre-clear snapshot.
@@ -190,7 +195,7 @@ function iconBonusTier(count) {
 function iconBonuses(board, units) {
   const bonuses = [];
   for (const unit of units) {
-    const counts = [0, 0, 0, 0, 0];
+    const counts = new Array(ICONS.length).fill(0);
     for (const idx of unit.cells) {
       const icon = board[idx];
       if (icon >= 0) counts[icon]++;
@@ -245,33 +250,48 @@ function matchingSetBonuses(bonuses) {
 
 /* ---- Items ---- */
 
-const ITEM_CAPS = { rotate: 3, undo: 3, freeze: 3 };
+const ITEM_CAPS = { rotate: 3, undo: 3, freeze: 3, reroll: 3 };
 
-/* Economy: rotate 1 per 200 cumulative points, undo 1 per 2 multi-set combos,
-   freeze 1 per Perfect Match and 1 per x3+ combo. Progress is per game. */
+/* History panels: how many recent score/streak entries a game keeps. */
+const SCORE_LOG_MAX = 6;
+const STREAK_LOG_MAX = 12;
+
+/* Economy (per game): rotate 1 per 200 cumulative points; undo 1 per 2 combos;
+   freeze 1 per Perfect Match, 1 per every 2nd combo, and 1 each time the streak
+   hits a multiple of 3; reroll 1 per x3+ combo, 1 per Matching Sets combo, and
+   1 each time the streak hits a multiple of 4. fcombos mirrors combos as the
+   freeze counter's own tally so undo and freeze pace independently. */
 function computeEarned(progress, turn) {
-  const p = { pts: progress.pts + turn.gained, combos: progress.combos };
-  const earned = { rotate: 0, undo: 0, freeze: 0 };
+  const p = { pts: progress.pts + turn.gained, combos: progress.combos, fcombos: progress.fcombos || 0 };
+  const earned = { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
   while (p.pts >= 200) { p.pts -= 200; earned.rotate++; }
-  if (turn.comboN >= 2) p.combos += 1;
+  if (turn.comboN >= 2) { p.combos += 1; p.fcombos += 1; }
   while (p.combos >= 2) { p.combos -= 2; earned.undo++; }
+  while (p.fcombos >= 2) { p.fcombos -= 2; earned.freeze++; }
   earned.freeze += turn.perfectCount || 0;
-  if (turn.comboN >= 3) earned.freeze++;
+  if (turn.comboN >= 3) earned.reroll++;
+  if (turn.msCombo) earned.reroll++;
+  const s = turn.streak || 0;
+  if (turn.comboN >= 1 && s > 0) {
+    if (s % 3 === 0) earned.freeze++;
+    if (s % 4 === 0) earned.reroll++;
+  }
   return { earned, progress: p };
 }
 
 function grantItems(inv, earned) {
-  const granted = { rotate: 0, undo: 0, freeze: 0 };
+  const granted = { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
   for (const k of Object.keys(granted)) {
-    const room = Math.max(0, ITEM_CAPS[k] - inv[k]);
+    const have = inv[k] || 0;
+    const room = Math.max(0, ITEM_CAPS[k] - have);
     granted[k] = Math.min(room, earned[k]);
-    inv[k] += granted[k];
+    inv[k] = have + granted[k];
   }
   return granted;
 }
 
 /* Rotation: 90 degrees clockwise, (r,c) -> (c, h-1-r), re-anchored to (0,0).
-   The 43-shape set is closed under rotation; ROTATION_MAP proves it at load. */
+   The 47-shape set is closed under rotation; ROTATION_MAP proves it at load. */
 function rotateShapeCells(cells, h) {
   const rot = cells.map(([r, c]) => [c, h - 1 - r]);
   let minR = Infinity, minC = Infinity;
@@ -326,6 +346,60 @@ function applyRotation(piece, rotateCount) {
   return { kind: 'charged', rotateCount: rotateCount - 1, piece: charged };
 }
 
+/* Reroll: swap a tray piece for a fresh one of a DIFFERENT shape (icon from the
+   same pool). The guard avoids handing back the identical shape; if the rng is
+   pathologically stuck it nudges to the next shape id, so a reroll always
+   changes something. */
+function rerollPiece(piece, rng) {
+  let shapeId = pickShapeId(rng);
+  let guard = 0;
+  while (shapeId === piece.shapeId && guard++ < 50) shapeId = pickShapeId(rng);
+  if (shapeId === piece.shapeId) shapeId = (shapeId + 1) % SHAPES.length;
+  return { shapeId, icon: pickIcon(rng) };
+}
+
+/* Rerolling a piece spends one Reroll and refunds any item still riding on the
+   old piece: an open rotate session gives the Rotate back, an iced piece gives
+   the Freeze back (both clamped to caps). Returns null when there is nothing to
+   spend (no piece or no stock); leaves the inputs untouched otherwise. */
+function applyReroll(piece, inv, rng) {
+  if (!piece || (inv.reroll || 0) <= 0) return null;
+  const next = { ...inv, reroll: inv.reroll - 1 };
+  const refundedRotate = !!piece.rotFree && next.rotate < ITEM_CAPS.rotate;
+  if (piece.rotFree) next.rotate = Math.min(ITEM_CAPS.rotate, next.rotate + 1);
+  const refundedFreeze = !!piece.frozen && next.freeze < ITEM_CAPS.freeze;
+  if (piece.frozen) next.freeze = Math.min(ITEM_CAPS.freeze, next.freeze + 1);
+  return { piece: rerollPiece(piece, rng), inv: next, refundedRotate, refundedFreeze };
+}
+
+/* One score-toast's worth of breakdown, frozen into a plain record for the
+   Recent-scores panel and (later) the toast itself. clear is derived, never a
+   free parameter, so a record can never disagree with clearScore(n). */
+function makeScoreLogEntry(n, placement, bonuses, msBonuses, streakK, streakPts, total) {
+  return { n, placement, clear: clearScore(n),
+    icons: bonuses.map((b) => ({ icon: b.icon, count: b.count, points: b.points, perfect: b.perfect })),
+    ms: msBonuses.map((m) => ({ icon: m.icon, unitCount: m.unitCount, points: m.points })),
+    streakK, streakPts, total };
+}
+
+/* Append to a capped history list without mutating the input. */
+function pushLog(list, entry, cap) {
+  const out = list.concat([entry]);
+  return out.length > cap ? out.slice(out.length - cap) : out;
+}
+
+/* Deep copy of a score/streak history pair, tolerant of absent fields. */
+function cloneScoreLog(list) {
+  return (list || []).map((e) => ({
+    ...e,
+    icons: (e.icons || []).map((x) => ({ ...x })),
+    ms: (e.ms || []).map((x) => ({ ...x })),
+  }));
+}
+function cloneStreakLog(list) {
+  return (list || []).map((e) => ({ ...e }));
+}
+
 /* One-level undo: deep snapshot of everything a turn can change. */
 function takeSnapshot(state) {
   return {
@@ -337,6 +411,8 @@ function takeSnapshot(state) {
     frozen: new Uint8Array(state.frozen),
     freezeHold: !!state.freezeHold,
     streak: state.streak,
+    scoreLog: cloneScoreLog(state.scoreLog),
+    streakLog: cloneStreakLog(state.streakLog),
   };
 }
 
@@ -365,7 +441,7 @@ function makePiece(rng) {
 }
 
 /* Fresh tray of 3. Variety rule: never 3 identical shapes in one tray.
-   Mercy rule: if none of the 3 fits, reroll the whole tray (up to 20
+   Mercy rule: if none of the 3 fits, regenerate the whole tray (up to 20
    attempts) then accept the last roll; the fit test ends the game honestly.
    No mid-tray mercy by design. */
 function genTray(board, rng) {
@@ -406,9 +482,10 @@ function defaultMeta() {
     volume: 50,
     theme: 'auto',
     nickname: '',
+    nickPrompted: false,
     seenTutorial: false,
     tutorialOffered: false,
-    itemHelp: { rotate: false, undo: false, freeze: false },
+    itemHelp: { rotate: false, undo: false, freeze: false, reroll: false },
   };
 }
 
@@ -436,6 +513,8 @@ function encodeGame(state) {
     frozen: frozenMaskToList(state.frozen),
     freezeHold: !!state.freezeHold,
     streak: state.streak || 0,
+    scoreLog: cloneScoreLog(state.scoreLog),
+    streakLog: cloneStreakLog(state.streakLog),
   };
 }
 
@@ -454,6 +533,68 @@ function sanitizeNickname(s) {
     .slice(0, 16);
 }
 
+/* Score/streak history are cosmetic panels only. They are validated LENIENTLY:
+   a bad ENTRY is dropped and its siblings kept, garbage becomes [], and no path
+   here ever throws or discards the game. clear is always recomputed from n, so a
+   tampered disk value can never show a wrong Clear line. */
+function sanitizeScoreLog(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const e of list) {
+    if (!e || typeof e !== 'object') continue;
+    const n = clampInt(e.n, 1, 50, null);
+    if (n === null) continue;
+    const placement = clampInt(e.placement, 0, 25, null);
+    if (placement === null) continue;
+    const streakK = clampInt(e.streakK, 0, 999, null);
+    if (streakK === null) continue;
+    const streakPts = clampInt(e.streakPts, 0, 99999, null);
+    if (streakPts === null) continue;
+    const total = clampInt(e.total, 0, 999999, null);
+    if (total === null) continue;
+    const icons = [];
+    if (Array.isArray(e.icons)) {
+      for (const b of e.icons.slice(0, 64)) {
+        if (!b || typeof b !== 'object') continue;
+        if (!Number.isInteger(b.icon) || b.icon < 0 || b.icon >= ICONS.length) continue;
+        const count = clampInt(b.count, 3, 9, null);
+        if (count === null) continue;
+        const points = clampInt(b.points, 0, 99999, null);
+        if (points === null) continue;
+        icons.push({ icon: b.icon, count, points, perfect: b.perfect === true });
+      }
+    }
+    const ms = [];
+    if (Array.isArray(e.ms)) {
+      for (const m of e.ms.slice(0, 64)) {
+        if (!m || typeof m !== 'object') continue;
+        if (!Number.isInteger(m.icon) || m.icon < 0 || m.icon >= ICONS.length) continue;
+        const unitCount = clampInt(m.unitCount, 2, 50, null);
+        if (unitCount === null) continue;
+        const points = clampInt(m.points, 0, 99999, null);
+        if (points === null) continue;
+        ms.push({ icon: m.icon, unitCount, points });
+      }
+    }
+    out.push({ n, placement, clear: clearScore(n), icons, ms, streakK, streakPts, total });
+  }
+  return out.slice(-SCORE_LOG_MAX);
+}
+
+function sanitizeStreakLog(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const e of list) {
+    if (!e || typeof e !== 'object') continue;
+    const n = clampInt(e.n, 1, 50, null);
+    if (n === null) continue;
+    const gained = clampInt(e.gained, 0, 999999, null);
+    if (gained === null) continue;
+    out.push({ n, gained });
+  }
+  return out.slice(-STREAK_LOG_MAX);
+}
+
 /* Returns full meta + game|null. On any surprise inside game, discard the
    game but keep the meta. v1 payloads (no v2 fields) migrate to defaults. */
 function validateSave(raw) {
@@ -467,11 +608,12 @@ function validateSave(raw) {
   out.volume = clampInt(raw.volume, 0, 100, 50);
   out.theme = ['auto', 'light', 'dark'].includes(raw.theme) ? raw.theme : 'auto';
   out.nickname = sanitizeNickname(raw.nickname);
+  out.nickPrompted = raw.nickPrompted === true;
   out.seenTutorial = raw.seenTutorial === true;
   out.tutorialOffered = raw.tutorialOffered === true;
   const ih = raw.itemHelp;
   if (ih && typeof ih === 'object') {
-    out.itemHelp = { rotate: ih.rotate === true, undo: ih.undo === true, freeze: ih.freeze === true };
+    out.itemHelp = { rotate: ih.rotate === true, undo: ih.undo === true, freeze: ih.freeze === true, reroll: ih.reroll === true };
   }
 
   const g = raw.game;
@@ -521,7 +663,7 @@ function validateSave(raw) {
     if (typeof g.score !== 'number' || !isFinite(g.score) || g.score < 0) return out;
 
     /* v2 fields; absent (v1 game) means defaults */
-    const inv = { rotate: 0, undo: 0, freeze: 0 };
+    const inv = { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
     if (g.inv !== undefined) {
       if (!g.inv || typeof g.inv !== 'object') return out;
       for (const k of Object.keys(inv)) {
@@ -529,11 +671,12 @@ function validateSave(raw) {
         inv[k] = Math.max(0, Math.min(ITEM_CAPS[k], g.inv[k] || 0));
       }
     }
-    const progress = { pts: 0, combos: 0 };
+    const progress = { pts: 0, combos: 0, fcombos: 0 };
     if (g.progress !== undefined) {
       if (!g.progress || typeof g.progress !== 'object') return out;
       progress.pts = clampInt(g.progress.pts, 0, 199, 0);
       progress.combos = clampInt(g.progress.combos, 0, 1, 0);
+      progress.fcombos = clampInt(g.progress.fcombos, 0, 1, 0);
     }
     const frozen = new Uint8Array(CELL_COUNT);
     if (g.frozen !== undefined) {
@@ -548,8 +691,10 @@ function validateSave(raw) {
     if (freezeHold && frozenMaskToList(frozen).length === 0) return out;
 
     const streak = clampInt(g.streak, 0, 999, 0);
+    const scoreLog = sanitizeScoreLog(g.scoreLog);
+    const streakLog = streak > 0 ? sanitizeStreakLog(g.streakLog) : [];
 
-    out.game = { board, tray, score: Math.floor(g.score), inv, progress, frozen, freezeHold, streak };
+    out.game = { board, tray, score: Math.floor(g.score), inv, progress, frozen, freezeHold, streak, scoreLog, streakLog };
     return out;
   } catch (e) {
     return out;
@@ -564,8 +709,9 @@ if (typeof module !== 'undefined' && module.exports) {
     emptyBoard, canPlace, fitsSomewhere, placePiece,
     scanUnits, unionCells, clearScore, streakBonus, iconBonusTier, iconBonuses,
     matchingSetsTier, matchingSetBonuses,
-    ITEM_CAPS, computeEarned, grantItems,
-    rotateShapeCells, ROTATION_MAP, applyRotation, takeSnapshot,
+    ITEM_CAPS, SCORE_LOG_MAX, STREAK_LOG_MAX, computeEarned, grantItems,
+    rotateShapeCells, ROTATION_MAP, applyRotation, rerollPiece, applyReroll,
+    makeScoreLogEntry, pushLog, takeSnapshot,
     pickShapeId, pickIcon, makePiece, genTray, isGameOver,
     defaultMeta, frozenMaskToList, encodeGame, validateSave, sanitizeNickname,
   };
@@ -619,11 +765,13 @@ function initUI() {
   let tray = [null, null, null];
   let score = 0;
   let best = 0;
-  let inv = { rotate: 0, undo: 0, freeze: 0 };
-  let progress = { pts: 0, combos: 0 };
+  let inv = { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
+  let progress = { pts: 0, combos: 0, fcombos: 0 };
   let frozen = new Uint8Array(CELL_COUNT);
   let freezeHold = false;
   let streak = 0;                 /* consecutive clearing placements */
+  let scoreLog = [];              /* recent per-clear breakdowns (newest last) */
+  let streakLog = [];             /* per-clear rows for the live streak, reset when it cools */
   let meta = defaultMeta();       /* volume, theme, nickname, tutorial + item-help flags */
   let undoSnapshot = null;        /* one level, in-memory only; gone after reload */
   let tutorial = null;            /* { step, stash } while the tutorial runs */
@@ -1006,6 +1154,7 @@ function initUI() {
     e.preventDefault();
     sound.unlock();
     if (freezeArming) { dipPiece(slot); return; }
+    if (rerollArming) { doReroll(slot); return; }
     if (tutorial) {
       const gate = TUT[tutorial.step].allowPickup;
       if (gate && !gate(slot)) return;
@@ -1196,7 +1345,7 @@ function initUI() {
   async function resolveTurn(slotIdx, row, col) {
     state = 'RESOLVING';
     /* Everything a turn can change, captured before any mutation */
-    undoSnapshot = takeSnapshot({ board, tray, score, inv, progress, frozen, freezeHold, streak });
+    undoSnapshot = takeSnapshot({ board, tray, score, inv, progress, frozen, freezeHold, streak, scoreLog, streakLog });
     const piece = tray[slotIdx];
     const shape = SHAPES[piece.shapeId];
     const dipped = !!piece.frozen;
@@ -1234,6 +1383,7 @@ function initUI() {
        cools it back to zero. */
     let gained;
     let streakPts = 0;
+    let scoreEntry = null;
     if (didFreeze) {
       for (const idx of union) frozen[idx] = 1;
       freezeHold = true;
@@ -1250,8 +1400,13 @@ function initUI() {
         + bonuses.reduce((a, b) => a + b.points, 0)
         + msBonuses.reduce((a, b) => a + b.points, 0)
         + streakPts;
+      /* A melt (freezeHold clear) logs like any other clear. */
+      scoreEntry = makeScoreLogEntry(n, shape.cells.length, bonuses, msBonuses, streak, streakPts, gained);
+      scoreLog = pushLog(scoreLog, scoreEntry, SCORE_LOG_MAX);
+      streakLog = pushLog(streakLog, { n, gained }, STREAK_LOG_MAX);
     } else {
       streak = 0;
+      streakLog = [];
       gained = shape.cells.length;
     }
     score += gained;
@@ -1261,7 +1416,11 @@ function initUI() {
 
     /* Item earning (economy in computeEarned; grants clamp at ITEM_CAPS) */
     const perfectCount = bonuses.filter((b) => b.perfect).length;
-    const earnResult = computeEarned(progress, { gained, comboN: didFreeze ? 0 : n, perfectCount });
+    const earnResult = computeEarned(progress, {
+      gained, comboN: didFreeze ? 0 : n, perfectCount,
+      streak: didFreeze ? 0 : streak,
+      msCombo: !didFreeze && msBonuses.length > 0,
+    });
     progress = earnResult.progress;
     const granted = grantItems(inv, earnResult.earned);
 
@@ -1296,10 +1455,15 @@ function initUI() {
         gained: melt.gained,
         comboN: melt.n,
         perfectCount: mBonuses.filter((b) => b.perfect).length,
+        streak: 0,
+        msCombo: mMs.length > 0,
       });
       progress = meltEarn.progress;
       const meltGranted = grantItems(inv, meltEarn.earned);
       for (const k of Object.keys(granted)) granted[k] += meltGranted[k];
+      /* No history append: a force-melt only ever happens at game over, where
+         the save is nulled anyway. The DOM phase may still build an ad hoc
+         entry for the melt toast, but nothing is logged. */
       over = isGameOver(board, tray);
     }
 
@@ -1322,7 +1486,7 @@ function initUI() {
       await wait(POP_MS + placedRender.length * POP_STAGGER);
       renderBoard(); /* paints the icy cells from the mask */
     } else if (n > 0) {
-      showScoreToast(n, shape.cells.length, bonuses, msBonuses, gained, streak, streakPts);
+      showScoreToast(scoreEntry);
       updateStreakPill(true);
       if (bonuses.length) {
         sound.bonus(bonuses.some((b) => b.icon === LIZARD_ICON));
@@ -1385,7 +1549,10 @@ function initUI() {
       showGameOver(newBest);
     } else {
       state = 'IDLE';
-      maybeShowItemHelp(granted);
+      /* The tutorial teaches items hands-on; its crafted melt can earn a
+         Rotate/Freeze, so suppress the first-earn help card here (it would
+         cover the coach). announceEarned's toast still reinforces the reward. */
+      if (!tutorial) maybeShowItemHelp(granted);
       if (tutorial) tutAdvance();
     }
   }
@@ -1558,8 +1725,10 @@ function initUI() {
     return t;
   }
 
-  /* The per-clear score breakdown. Tapping it will open the scoring sheet. */
-  function showScoreToast(n, placementPts, bonuses, msBonuses, total, streakK, streakPts) {
+  /* The per-clear score breakdown, built from one makeScoreLogEntry record so
+     the live toast and the Recent-scores panel can never disagree. Returns the
+     box plus whether a lizard bonus showed (the toast pulses pink for it). */
+  function buildBreakdown(entry) {
     const box = document.createElement('div');
     const row = (label, pts, cls) => {
       const r = document.createElement('div');
@@ -1572,26 +1741,33 @@ function initUI() {
       r.append(l, p);
       box.appendChild(r);
     };
+    const n = entry.n;
     if (n >= 2) {
       const head = document.createElement('div');
       head.className = 't-head';
       head.textContent = 'Combo x' + n + '! ' + (n >= 5 ? COMBO_LEGENDARY : COMBO_PHRASES[n]);
       box.appendChild(head);
     }
-    row('Placement', placementPts);
-    row('Clear x' + n, clearScore(n));
+    row('Placement', entry.placement);
+    row('Clear x' + n, entry.clear);
     let lizardHit = false;
-    for (const b of bonuses) {
+    for (const b of entry.icons) {
       const label = b.perfect ? 'Perfect Match!' : ICON_LABELS[b.icon].replace('!', '');
       row(ICONS[b.icon] + ' ' + label + ' x' + b.count, b.points);
       if (b.icon === LIZARD_ICON) lizardHit = true;
     }
-    for (const ms of msBonuses) {
+    for (const ms of entry.ms) {
       row(ICONS[ms.icon] + ' Matching Sets x' + ms.unitCount, ms.points);
       if (ms.icon === LIZARD_ICON) lizardHit = true;
     }
-    if (streakPts > 0) row('\u{1F525} Streak x' + streakK + '!', streakPts, 'streak');
-    row('Total', total, 'total');
+    if (entry.streakPts > 0) row('\u{1F525} Streak x' + entry.streakK + '!', entry.streakPts, 'streak');
+    row('Total', entry.total, 'total');
+    return { box, lizardHit };
+  }
+
+  /* Thin wrapper: the live score toast, tap to open the scoring sheet. */
+  function showScoreToast(entry) {
+    const { box, lizardHit } = buildBreakdown(entry);
     if (lizardHit && !reducedMotion) pulseGlow('pulse', 520);
     showToast('score-toast', box, { ttl: 4800, onTap: openScoreHelp });
   }
@@ -1601,8 +1777,126 @@ function initUI() {
   function openScoreHelp() { scoreHelpEl.hidden = false; }
   $('scoreHelpClose').addEventListener('click', () => { sound.tap(); scoreHelpEl.hidden = true; });
 
+  /* Static mini board diagrams for the scoring sheet, built once from a data
+     table. Tokens per cell: '.' empty, '0'-'5' a filled cell showing ICONS[d],
+     'A'-'F' a landing (dashed) cell showing ICONS[letter]; ring lists the
+     gold-ringed cell indexes ('all' rings every cell); pts is the headline.
+     Every headline is verified against the engine scoring functions:
+       place  L4 on empty grid            -> placement 4
+       clear  2-block piece finishing a row-> placement 2 + clearScore(1) 18 = 20
+       combo  single lands a row and a col -> clearScore(2) = 54
+       icon   6 stars in a cleared row     -> iconBonusTier(6) = 25
+       perfect box of 9 berries            -> iconBonusTier(9) = 100
+       msets  flowers matched across 2 sets-> matchingSetsTier(2) = 50
+       lizard 3 lizards in a cleared row   -> iconBonusTier(3) * 2 = 20 */
+  const HELP_DIAGRAMS = {
+    place:   { rows: ['E..', 'E..', 'EE.'], ring: [], pts: '+4' },
+    clear:   { rows: ['1234512DE'], ring: [], pts: '+20' },
+    combo:   { rows: ['..1..', '..2..', '34B51', '..2..', '..3..'], ring: [], pts: '+54' },
+    icon:    { rows: ['333333214'], ring: [0, 1, 2, 3, 4, 5], pts: '+25' },
+    perfect: { rows: ['444', '444', '4EE'], ring: 'all', pts: '+100' },
+    msets:   { rows: ['..1..', '..1..', '11111', '..1..', '..1..'], ring: [2, 7, 10, 11, 12, 13, 14, 17, 22], pts: '+50' },
+    lizard:  { rows: ['000123451'], ring: [0, 1, 2], pts: '+20' },
+  };
+
+  function buildHelpDiagram(spec) {
+    const wrap = document.createElement('div');
+    wrap.className = 'mini-wrap';
+    const grid = document.createElement('div');
+    grid.className = 'mini';
+    grid.style.setProperty('--mini-cols', spec.rows[0].length);
+    const ringAll = spec.ring === 'all';
+    const ringSet = ringAll ? null : new Set(spec.ring);
+    let idx = 0;
+    for (const rowStr of spec.rows) {
+      for (const ch of rowStr) {
+        const cell = document.createElement('div');
+        cell.className = 'mc';
+        let icon = -1;
+        if (ch >= '0' && ch <= '5') { icon = ch.charCodeAt(0) - 48; cell.classList.add('filled'); }
+        else if (ch >= 'A' && ch <= 'F') { icon = ch.charCodeAt(0) - 65; cell.classList.add('land'); }
+        if (icon >= 0) {
+          const ic = document.createElement('span');
+          ic.className = 'ic';
+          ic.textContent = ICONS[icon];
+          cell.appendChild(ic);
+        }
+        if (ringAll || (ringSet && ringSet.has(idx))) cell.classList.add('ring');
+        grid.appendChild(cell);
+        idx++;
+      }
+    }
+    const pts = document.createElement('div');
+    pts.className = 'mini-pts';
+    pts.textContent = spec.pts;
+    wrap.append(grid, pts);
+    return wrap;
+  }
+
+  function initHelpDiagrams() {
+    for (const el of document.querySelectorAll('#scoreHelp .help-item[data-ex]')) {
+      const spec = HELP_DIAGRAMS[el.dataset.ex];
+      if (!spec) continue;
+      const diagram = buildHelpDiagram(spec);
+      const ex = el.querySelector('.ex');
+      if (ex) el.insertBefore(diagram, ex);
+      else el.appendChild(diagram);
+    }
+  }
+
+  /* ---- History panels: the score and streak pills each open a sheet ---- */
+  const scorePanelEl = $('scorePanel');
+  const streakPanelEl = $('streakPanel');
+
+  function renderScorePanel() {
+    const body = $('scorePanelBody');
+    body.textContent = '';
+    if (scoreLog.length === 0) {
+      const p = document.createElement('p');
+      p.className = 'panel-empty';
+      p.textContent = 'Nothing scored yet. Go clear something!';
+      body.appendChild(p);
+      return;
+    }
+    for (let i = scoreLog.length - 1; i >= 0; i--) {
+      const { box } = buildBreakdown(scoreLog[i]);
+      box.classList.add('bd-entry');
+      body.appendChild(box);
+    }
+  }
+
+  function renderStreakPanel() {
+    const body = $('streakPanelBody');
+    body.textContent = '';
+    if (streakLog.length === 0) {
+      const p = document.createElement('p');
+      p.className = 'panel-empty';
+      p.textContent = 'No streak burning right now';
+      body.appendChild(p);
+      return;
+    }
+    const box = document.createElement('div');
+    box.className = 'bd-entry';
+    streakLog.forEach((e, i) => {
+      const r = document.createElement('div');
+      r.className = 't-row';
+      const l = document.createElement('span');
+      l.textContent = 'Clear ' + (i + 1) + (e.n >= 2 ? ' (combo x' + e.n + ')' : '');
+      const p = document.createElement('span');
+      p.className = 'pts';
+      p.textContent = '+' + e.gained;
+      r.append(l, p);
+      box.appendChild(r);
+    });
+    const foot = document.createElement('div');
+    foot.className = 't-row total';
+    foot.textContent = 'Next clear pays +' + (10 * streak) + ' extra';
+    box.appendChild(foot);
+    body.appendChild(box);
+  }
+
   /* ---- Items bar ---- */
-  const itemBtns = { rotate: $('itemRotate'), undo: $('itemUndo'), freeze: $('itemFreeze') };
+  const itemBtns = { rotate: $('itemRotate'), undo: $('itemUndo'), freeze: $('itemFreeze'), reroll: $('itemReroll') };
   const ITEM_INFO = {
     rotate: {
       icon: '\u{1F504}', article: 'a', name: 'Rotate',
@@ -1614,7 +1908,11 @@ function initUI() {
     },
     freeze: {
       icon: '❄️', article: 'a', name: 'Freeze',
-      text: 'Dips a piece in ice: sets it finishes wait one turn and then clear together in a bigger combo. Earned with Perfect Matches and x3 combos!',
+      text: 'Ices a piece: the sets it finishes wait one turn, then melt into your next clear as one bigger combo. Earn one from Perfect Matches, every 2nd combo, and a x3 streak!',
+    },
+    reroll: {
+      icon: '\u{1F3B2}', article: 'a', name: 'Reroll',
+      text: 'Swaps a tray piece for a brand new one. Tap \u{1F3B2}, then tap the piece you want gone. Earn one from x3 combos, x4 streaks, and Matching Sets combos!',
     },
   };
 
@@ -1691,8 +1989,11 @@ function initUI() {
     frozen = snap.frozen;
     freezeHold = snap.freezeHold;
     streak = snap.streak;
+    scoreLog = snap.scoreLog;
+    streakLog = snap.streakLog;
     inv.undo = Math.max(0, inv.undo - 1);
     if (state === 'GAME_OVER') {
+      resolveNickPrompt();
       gameOverEl.classList.remove('show');
       gameOverEl.hidden = true;
     }
@@ -1705,6 +2006,7 @@ function initUI() {
     updateStreakPill(false);
     persist();
     showToast('item-toast', '↩️ Move undone');
+    if (tutorial) tutAdvance();
   }
 
   itemBtns.undo.addEventListener('click', () => {
@@ -1734,6 +2036,7 @@ function initUI() {
     if (inv.freeze <= 0) return;
     if (freezeHold) { showToast('item-toast', '❄️ A freeze is already waiting to melt'); return; }
     if (tray.some((p) => p && p.frozen)) { showToast('item-toast', '❄️ A piece is already dipped'); return; }
+    setRerollArming(false);
     setArming(true);
     showToast('item-toast', '❄️ Tap a tray piece to dip it in ice');
   });
@@ -1747,6 +2050,45 @@ function initUI() {
     renderTray();
     updateItemsBar();
     persist();
+    if (tutorial) tutAdvance();
+  }
+
+  /* ---- Reroll: arm from the bar, then tap a tray piece to swap it ---- */
+  let rerollArming = false;
+
+  function setRerollArming(on) {
+    rerollArming = on;
+    itemBtns.reroll.classList.toggle('armed', on);
+  }
+
+  itemBtns.reroll.addEventListener('click', () => {
+    if (state !== 'IDLE') return;
+    if (rerollArming) {
+      setRerollArming(false);
+      showToast('item-toast', '\u{1F3B2} Reroll canceled');
+      return;
+    }
+    if (inv.reroll <= 0) return;
+    setArming(false);
+    setRerollArming(true);
+    showToast('item-toast', '\u{1F3B2} Tap a tray piece to swap it for a new one');
+  });
+
+  function doReroll(slot) {
+    setRerollArming(false);
+    if (state !== 'IDLE') return;
+    const res = applyReroll(tray[slot], inv, rng);
+    if (!res) return;
+    inv = res.inv;
+    tray[slot] = res.piece;
+    showToast('item-toast', '\u{1F3B2} Fresh piece!');
+    if (res.refundedRotate) showToast('item-toast', '\u{1F504} Rotate returned!');
+    if (res.refundedFreeze) showToast('item-toast', '❄️ Freeze returned!');
+    sound.tap();
+    renderTray();
+    updateItemsBar();
+    persist();
+    if (tutorial) tutAdvance();
   }
 
   /* ---- Interactive tutorial. Runs on the real engine against crafted
@@ -1800,7 +2142,7 @@ function initUI() {
         board = emptyBoard();
         [3, 1, 4, 2, 3, 1].forEach((icon, c) => { board[4 * N + c] = icon; });
         board[5 * N + 6] = 2; /* blocks the unrotated drop */
-        inv = { rotate: 1, undo: 0, freeze: 0 };
+        inv = { rotate: 1, undo: 0, freeze: 0, reroll: 0 };
         tray = [{ shapeId: 6, icon: 4 }, null, null];
       },
       anchor: () => slotEls[0],
@@ -1808,21 +2150,86 @@ function initUI() {
       allowDrop: (r, c) => r === 4 && c === 6,
     },
     {
-      text: '↩️ Undo takes back your last move. ❄️ Freeze dips a piece so finished sets wait one turn and melt into a bigger combo. You earn items by scoring!',
+      /* 5 undo-a: a tempting star that finishes the row but spoils the flower
+         Perfect Match. The drop is forced so the lesson lands in step 6. */
+      text: 'This ⭐ finishes the row, but it spoils a flower Perfect Match. Drop it in anyway!',
       setup() {
         board = emptyBoard();
-        tray = [null, null, null];
+        for (let c = 0; c < 8; c++) board[4 * N + c] = 1; /* flowers cols 0-7 */
+        inv = { rotate: 0, undo: 1, freeze: 0, reroll: 0 };
+        tray = [{ shapeId: 0, icon: 3 }, null, null]; /* star single */
       },
-      anchor: () => itemsBarEl,
-      next: true,
+      anchor: () => cellEls[4 * N + 8],
+      allowDrop: (r, c) => r === 4 && c === 8,
     },
     {
-      text: 'The ⚙️ button has volume, themes, and the full scoring guide. That is everything: have fun, ' + PLAYER_NAME + '! \u{1F49C}',
+      /* 6 undo-b: the placed star already cleared the row; tapping Undo rewinds
+         the whole move (the surviving snapshot brings the star back). */
+      text: 'Regrets? Tap ↩️ Undo and the whole move rewinds!',
+      setup() {
+        board = emptyBoard();
+        inv = { rotate: 0, undo: 1, freeze: 0, reroll: 0 };
+        tray = [null, null, null];
+      },
+      anchor: () => $('itemUndo'),
+    },
+    {
+      /* 7 freeze-a: arm Freeze, then tap the piece to ice it (dipPiece advances).
+         allowPickup false forces the button-first gesture. */
+      text: '❄️ Freeze! Tap the ❄️ button, then tap your piece to coat it in ice.',
+      setup() {
+        board = emptyBoard();
+        for (let c = 0; c < 8; c++) board[4 * N + c] = 1; /* flowers cols 0-7 */
+        inv = { rotate: 0, undo: 0, freeze: 1, reroll: 0 };
+        tray = [{ shapeId: 0, icon: 1 }, null, null]; /* flower single */
+      },
+      anchor: () => $('itemFreeze'),
+      allowPickup: () => false,
+    },
+    {
+      /* 8 freeze-b: the pre-iced piece finishes the row but freezes it solid. */
+      text: 'Now finish the row. Watch: it freezes solid instead of clearing!',
+      setup() {
+        board = emptyBoard();
+        for (let c = 0; c < 8; c++) board[4 * N + c] = 1; /* flowers cols 0-7 */
+        tray = [{ shapeId: 0, icon: 1, frozen: true }, null, null]; /* pre-iced flower */
+      },
+      anchor: () => cellEls[4 * N + 8],
+      allowDrop: (r, c) => r === 4 && c === 8,
+    },
+    {
+      /* 9 freeze-c: a real x2 melt. The frozen flower row waits; completing the
+         heart column melts both together as one big combo. */
+      text: 'Finish another set and everything melts together: one big combo!',
+      setup() {
+        board = emptyBoard();
+        for (let c = 0; c < N; c++) board[4 * N + c] = 1; /* frozen flower row */
+        for (let r = 0; r < 8; r++) if (r !== 4) board[r * N + 2] = 2; /* hearts col 2 */
+        for (let c = 0; c < N; c++) frozen[4 * N + c] = 1;
+        freezeHold = true;
+        tray = [{ shapeId: 0, icon: 2 }, null, null]; /* heart single */
+      },
+      anchor: () => cellEls[8 * N + 2],
+      allowDrop: (r, c) => r === 8 && c === 2,
+    },
+    {
+      /* 10 reroll: arm Reroll, then tap the piece to swap it (doReroll advances). */
+      text: '\u{1F3B2} A piece you do not like? Tap \u{1F3B2} Reroll, then tap the piece to swap it!',
+      setup() {
+        board = emptyBoard();
+        inv = { rotate: 0, undo: 0, freeze: 0, reroll: 1 };
+        tray = [{ shapeId: 38, icon: 4 }, null, null]; /* Plus5 */
+      },
+      anchor: () => $('itemReroll'),
+      allowPickup: () => false,
+    },
+    {
+      text: 'Tap your score pill anytime to see how a move paid, and ⚙️ has the full guide. That is everything: have fun, ' + PLAYER_NAME + '! \u{1F49C}',
       setup() {
         board = emptyBoard();
         tray = [null, null, null];
       },
-      anchor: () => $('settingsBtn'),
+      anchor: () => document.querySelector('.score-pill'),
       next: true,
       nextLabel: 'Finish',
     },
@@ -1832,11 +2239,12 @@ function initUI() {
     if (tutorial || state !== 'IDLE') return;
     tutorial = {
       step: -1,
-      stash: { board, tray, score, best, inv, progress, frozen, freezeHold, streak, undoSnapshot },
+      stash: { board, tray, score, best, inv, progress, frozen, freezeHold, streak, scoreLog, streakLog, undoSnapshot },
     };
     score = 0;
     undoSnapshot = null;
     setArming(false);
+    setRerollArming(false);
     updateScoreDisplay(true);
     $('tutSkip').hidden = false;
     nextTutStep();
@@ -1855,6 +2263,8 @@ function initUI() {
     frozen = s.frozen;
     freezeHold = s.freezeHold;
     streak = s.streak;
+    scoreLog = s.scoreLog;
+    streakLog = s.streakLog;
     undoSnapshot = s.undoSnapshot;
     meta.seenTutorial = true;
     coachEl.hidden = true;
@@ -1876,11 +2286,13 @@ function initUI() {
     tutorial.step++;
     if (tutorial.step >= TUT.length) { endTutorial(); return; }
     const s = TUT[tutorial.step];
-    inv = { rotate: 0, undo: 0, freeze: 0 };
-    progress = { pts: 0, combos: 0 };
+    inv = { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
+    progress = { pts: 0, combos: 0, fcombos: 0 };
     frozen = new Uint8Array(CELL_COUNT);
     freezeHold = false;
     streak = 0;
+    scoreLog = [];
+    streakLog = [];
     s.setup();
     renderBoard();
     renderTray();
@@ -2056,7 +2468,7 @@ function initUI() {
     lbPanelEl.hidden = false;
     const cached = lb.cachedTop();
     renderLb(cached, cached ? 'Refreshing...' : 'Loading...');
-    lb.submitBest(); /* natural retry point for an unsent best */
+    if (!nickPending) lb.submitBest(); /* natural retry point for an unsent best */
     try {
       renderLb(await lb.fetchTop());
     } catch (err) {
@@ -2069,7 +2481,7 @@ function initUI() {
     $('lbGameOver').hidden = false;
   }
   $('lbBtn').addEventListener('click', () => { sound.tap(); openLeaderboard(); });
-  $('lbGameOver').addEventListener('click', () => { sound.tap(); openLeaderboard(); });
+  $('lbGameOver').addEventListener('click', () => { sound.tap(); resolveNickPrompt(); openLeaderboard(); });
   $('lbClose').addEventListener('click', () => { sound.tap(); lbPanelEl.hidden = true; });
   /* Her crown pill is a door to the leaderboard too */
   const bestPillEl = document.querySelector('.best-pill');
@@ -2080,7 +2492,51 @@ function initUI() {
     sound.tap();
     openLeaderboard();
   });
-  window.addEventListener('online', () => lb.submitBest());
+  window.addEventListener('online', () => { if (!nickPending) lb.submitBest(); });
+
+  /* The score pill opens a log of recent breakdowns; the streak pill opens the
+     live streak (it only takes taps while lit, via pointer-events in CSS). */
+  const scorePillEl = document.querySelector('.score-pill');
+  scorePillEl.setAttribute('role', 'button');
+  scorePillEl.setAttribute('aria-label', 'Show recent scores');
+  scorePillEl.addEventListener('click', () => {
+    if (state !== 'IDLE' || tutorial) return;
+    sound.tap();
+    renderScorePanel();
+    scorePanelEl.hidden = false;
+  });
+  streakPill.setAttribute('role', 'button');
+  streakPill.setAttribute('aria-label', 'Show this streak');
+  streakPill.addEventListener('click', () => {
+    if (state !== 'IDLE' || tutorial) return;
+    sound.tap();
+    renderStreakPanel();
+    streakPanelEl.hidden = false;
+  });
+  $('scorePanelClose').addEventListener('click', () => { sound.tap(); scorePanelEl.hidden = true; });
+  $('streakPanelClose').addEventListener('click', () => { sound.tap(); streakPanelEl.hidden = true; });
+
+  /* ---- Nickname prompt: shown once, on the first New Best game over, only
+     when a leaderboard exists and no name is set yet. Any path that leaves the
+     game-over card resolves it first so the best is submitted with the name. ---- */
+  let nickPending = false;
+
+  function resolveNickPrompt() {
+    if (!nickPending) return;
+    nickPending = false;
+    const nm = sanitizeNickname($('nickPromptInput').value);
+    if (nm) {
+      meta.nickname = nm;
+      persist();
+    }
+    $('nickPrompt').hidden = true;
+    lb.submitBest();
+  }
+
+  $('nickPromptSave').addEventListener('click', () => { sound.tap(); resolveNickPrompt(); });
+  $('nickPromptInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); resolveNickPrompt(); }
+  });
 
   /* ---- Overlays ---- */
   function showGameOver(newBest) {
@@ -2099,7 +2555,18 @@ function initUI() {
       headline.classList.remove('gold');
     }
     $('undoGameOver').hidden = !(inv.undo > 0 && undoSnapshot);
-    lb.submitBest();
+    const wantsNick = newBest && LEADERBOARD_URL && !meta.nickname && !meta.nickPrompted;
+    const nickEl = $('nickPrompt');
+    if (wantsNick) {
+      $('nickPromptInput').value = '';
+      nickEl.hidden = false;
+      nickPending = true;
+      meta.nickPrompted = true;
+      persist();
+    } else {
+      nickEl.hidden = true;
+      lb.submitBest();
+    }
     gameOverEl.hidden = false;
     void gameOverEl.offsetWidth; /* flush styles so the card entrance transition plays */
     gameOverEl.classList.add('show');
@@ -2135,7 +2602,7 @@ function initUI() {
     maybeOfferTutorial();
   }
 
-  $('playAgain').addEventListener('click', () => { sound.tap(); resetGame(); });
+  $('playAgain').addEventListener('click', () => { sound.tap(); resolveNickPrompt(); resetGame(); });
   $('restartBtn').addEventListener('click', () => {
     if (state !== 'IDLE' || tutorial) return;
     sound.tap();
@@ -2239,7 +2706,7 @@ function initUI() {
       meta.best = best;
       meta.muted = sound.isMuted();
       const over = state === 'GAME_OVER' || isGameOver(board, tray);
-      const game = over ? null : encodeGame({ board, tray, score, inv, progress, frozen, freezeHold, streak });
+      const game = over ? null : encodeGame({ board, tray, score, inv, progress, frozen, freezeHold, streak, scoreLog, streakLog });
       localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 2, ...meta, game }));
     } catch (err) { /* storage may be unavailable; play on */ }
   }
@@ -2247,11 +2714,13 @@ function initUI() {
   function freshGameState() {
     board = emptyBoard();
     score = 0;
-    inv = { rotate: 0, undo: 0, freeze: 0 };
-    progress = { pts: 0, combos: 0 };
+    inv = { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
+    progress = { pts: 0, combos: 0, fcombos: 0 };
     frozen = new Uint8Array(CELL_COUNT);
     freezeHold = false;
     streak = 0;
+    scoreLog = [];
+    streakLog = [];
     tray = genTray(board, rng);
   }
 
@@ -2273,6 +2742,8 @@ function initUI() {
       frozen = game.frozen;
       freezeHold = game.freezeHold;
       streak = game.streak;
+      scoreLog = game.scoreLog;
+      streakLog = game.streakLog;
       if (tray.every((p) => p === null)) tray = genTray(board, rng);
     } else {
       freshGameState();
@@ -2321,6 +2792,7 @@ function initUI() {
   sound.setVolume(meta.volume);
   applyTheme();
   relayout();
+  initHelpDiagrams();
   renderBoard();
   renderTray();
   updateItemsBar();

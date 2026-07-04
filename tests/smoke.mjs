@@ -89,6 +89,36 @@ check('score starts at 0', (await score()) === 0);
 await page.screenshot({ path: ART + 'mobile-fresh.png' });
 
 console.log('2. Drag-and-drop placement');
+// Regression (v2.1 mid-screen pop): on pickup the ghost piece must grow OUT of
+// its tray slot, not fling toward mid-screen. The old bug animated the scale
+// property on #ghost itself, multiplying its translate offset and throwing the
+// piece ~200px up in the first frames before settling back. The fix scales the
+// .piece child instead, so it only ever lifts a little toward the finger. Sample
+// the ghost piece early (while the pop is playing) and make sure it never
+// strays far from the slot it was lifted from. A bare down/up places nothing, so
+// the piece snaps back and the placement checks below run on the same piece.
+{
+  const slotBox = await page.locator('.slot').nth(0).boundingBox();
+  const slotCx = slotBox.x + slotBox.width / 2;
+  const slotCy = slotBox.y + slotBox.height / 2;
+  await page.mouse.move(slotCx, slotCy);
+  await page.mouse.down();
+  let popStray = 0;
+  let elapsed = 0;
+  for (const t of [40, 70]) { // the pop's first frames are where the old bug flung it
+    await page.waitForTimeout(t - elapsed);
+    elapsed = t;
+    const gb = await page.locator('#ghost .piece').boundingBox();
+    const d = Math.hypot(gb.x + gb.width / 2 - slotCx, gb.y + gb.height / 2 - slotCy);
+    if (d > popStray) popStray = d;
+  }
+  await page.mouse.up(); // no movement: the piece snaps back to its slot
+  await page.waitForTimeout(300);
+  check('pickup grows out of the tray slot (no mid-screen pop)', popStray < 120,
+    'max ghost stray = ' + popStray.toFixed(0) + 'px');
+  check('bare pickup left the piece in slot 0',
+    (await page.locator('.slot').nth(0).locator('.piece').count()) === 1);
+}
 const cellsInPiece = await page.locator('.slot').nth(0).locator('.pcell').count();
 await dragPiece(0, 3, 3);
 await page.waitForTimeout(600);
@@ -174,6 +204,7 @@ check('game over shown', true);
 check('final score 101', (await page.locator('#finalScore').textContent()) === '101');
 const headline = await page.locator('#gameOverTitle').textContent();
 check('new best headline', headline.includes('New Best'), headline);
+check('no nickname prompt without a leaderboard URL', (await page.locator('#nickPrompt:not([hidden])').count()) === 0);
 await page.screenshot({ path: ART + 'mobile-gameover.png' });
 await page.tap('#playAgain');
 await page.waitForTimeout(300);
@@ -240,8 +271,9 @@ check('scoring sheet opens from settings', (await page.locator('#scoreHelp:not([
 {
   const sheetText = await page.locator('#scoreHelp .help-body').textContent();
   check('sheet explains item earning', sheetText.includes('Rotate') && sheetText.includes('every 200 points')
-    && sheetText.includes('Undo') && sheetText.includes('Freeze'));
+    && sheetText.includes('Undo') && sheetText.includes('Freeze') && sheetText.includes('Reroll'));
   check('sheet gives scoring examples', (await page.locator('#scoreHelp .ex').count()) >= 10);
+  check('sheet draws seven mini board diagrams', (await page.locator('#scoreHelp .mini').count()) === 7);
 }
 await page.tap('#scoreHelpClose');
 await page.tap('#settingsDone');
@@ -467,6 +499,13 @@ await dragPiece(0, 0, 0); // dipped Diag3 completes box 0 exactly
 await page.waitForSelector('#itemHelp:not([hidden])', { timeout: 6000 });
 check('force-melt earns a freeze (first-earn card)', (await page.locator('#itemHelpTitle').textContent()).includes('Freeze'));
 await page.tap('#itemHelpOk');
+await page.waitForTimeout(100);
+// The perfect box also fires an icon bonus, so the melt earns a Reroll too: clear that card.
+if (await page.locator('#itemHelp:not([hidden])').count()) {
+  check('force-melt also first-earns Reroll', (await page.locator('#itemHelpTitle').textContent()).includes('Reroll'));
+  await page.tap('#itemHelpOk');
+  await page.waitForTimeout(100);
+}
 check('force-melt rescued the game (no game over)', (await page.locator('#gameOver.show').count()) === 0);
 check('force-melt cleared the frozen box', (await page.locator('.cell.frozen').count()) === 0
   && (await filledCount()) === 57, 'filled=' + (await filledCount()));
@@ -496,9 +535,15 @@ await page.tap('#itemHelpOk');
 await page.waitForTimeout(200);
 check('then first-earns Freeze', (await page.locator('#itemHelpTitle').textContent()).includes('Freeze'));
 await page.tap('#itemHelpOk');
+await page.waitForTimeout(200);
+check('then first-earns Reroll', (await page.locator('#itemHelpTitle').textContent()).includes('Reroll'));
+await page.tap('#itemHelpOk');
+await page.waitForTimeout(100);
 check('triple perfect scored 493', (await score()) === 493, 'score=' + (await score()));
 check('rotate stock from 493 points', (await page.locator('#itemRotate .cnt').textContent()) === '2');
 check('freeze stock capped at 3', (await page.locator('#itemFreeze .cnt').textContent()) === '3');
+// The x3 combo pays one Reroll, and 3 flower units firing Matching Sets pays another.
+check('reroll stock from the x3 combo and Matching Sets', (await page.locator('#itemReroll .cnt').textContent()) === '2');
 
 console.log('7j2. Streak: back-to-back clears pay a rising bonus');
 // Rows 0 and 1 (cols 0-7) with mixed icons so no single icon reaches 3 in a
@@ -526,23 +571,90 @@ await page.waitForTimeout(600);
 }
 check('streak pill hidden at x1', (await page.locator('#streakPill.show').count()) === 0);
 check('score 19 after the first clear', (await score()) === 19, 'score=' + (await score()));
-// Second back-to-back clear: streak x2 pays +25 (Total +44).
+// Second back-to-back clear: streak x2 pays +10 (Total +29).
 await dragPiece(1, 1, 8);
 await page.waitForTimeout(600);
 {
   const t = await page.locator('.toast.score-toast').last().textContent();
-  check('second clear shows the streak bonus', t.includes('Streak x2') && t.includes('Total+44'), t);
+  check('second clear shows the streak bonus', t.includes('Streak x2') && t.includes('Total+29'), t);
 }
 check('streak pill shows x2', (await page.locator('#streakPill.show').count()) === 1
   && (await page.locator('#streakPill').textContent()).includes('x2'));
 check('streak persisted to the save', (await savedStreak()) === 2);
-check('score 63 after the streak clear', (await score()) === 63, 'score=' + (await score()));
+check('score 48 after the streak clear', (await score()) === 48, 'score=' + (await score()));
+// The lit streak pill opens the streak panel: the footer promises the next
+// clear's bonus (10 * streak = +20 at x2) and each clear's payout is listed.
+await page.tap('#streakPill');
+await page.waitForTimeout(200);
+check('streak pill opens the streak panel', (await page.locator('#streakPanel:not([hidden])').count()) === 1);
+{
+  const panelText = await page.locator('#streakPanelBody').textContent();
+  check('streak panel shows the live rows and next-clear footer',
+    panelText.includes('+29') && panelText.includes('Next clear pays +20 extra'), panelText);
+}
+await page.tap('#streakPanelClose');
+await page.waitForTimeout(100);
+check('streak panel closes', (await page.locator('#streakPanel:not([hidden])').count()) === 0);
 // A placement that clears nothing cools the streak back to 0.
 await dragPiece(2, 4, 4);
 await page.waitForTimeout(400);
 check('streak pill hidden after a cold placement', (await page.locator('#streakPill.show').count()) === 0);
+check('hidden streak pill is untappable',
+  (await page.locator('#streakPill').evaluate((el) => getComputedStyle(el).pointerEvents)) === 'none');
 check('streak reset in the save', (await savedStreak()) === 0);
-check('score 64 after the cold placement', (await score()) === 64, 'score=' + (await score()));
+check('score 49 after the cold placement', (await score()) === 49, 'score=' + (await score()));
+
+console.log('7j3. Score panel: the score pill opens recent breakdowns');
+{
+  const board = new Array(81).fill(-1);
+  [1, 1, 1, 2, 2, 2, 3, 3].forEach((icon, c) => { board[c] = icon; });
+  await injectSave({
+    v: 2, best: 5,
+    game: {
+      board, tray: [{ shapeId: 0, icon: 4 }, { shapeId: 0, icon: 2 }, { shapeId: 1, icon: 3 }],
+      score: 0, inv: { rotate: 0, undo: 0, freeze: 0 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+await dragPiece(0, 0, 8); // completes row 0, logging one breakdown
+await page.waitForTimeout(1000); // let the clear finish so the turn returns to IDLE
+await page.tap('.score-pill');
+await page.waitForTimeout(200);
+check('score pill opens the recent-scores panel', (await page.locator('#scorePanel:not([hidden])').count()) === 1);
+check('score panel lists a breakdown ending in a total', (await page.locator('#scorePanel .bd-entry').count()) >= 1
+  && (await page.locator('#scorePanel .bd-entry').first().textContent()).includes('Total'));
+await page.tap('#scorePanelClose');
+await page.waitForTimeout(100);
+check('score panel closes', (await page.locator('#scorePanel:not([hidden])').count()) === 0);
+
+console.log('7j4. Reroll: arm, cancel, then swap a tray piece');
+{
+  const board = new Array(81).fill(-1);
+  await injectSave({
+    v: 2, best: 5,
+    game: {
+      board, tray: [{ shapeId: 0, icon: 3 }, { shapeId: 1, icon: 2 }, { shapeId: 13, icon: 4 }],
+      score: 0, inv: { rotate: 0, undo: 0, freeze: 0, reroll: 1 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+const rerollCnt = () => page.locator('#itemReroll .cnt').textContent();
+const savedInv = () => page.evaluate(() => JSON.parse(localStorage.getItem('lizard-blockdoku-v1')).game.inv);
+check('reroll badge shows 1', (await rerollCnt()) === '1');
+// Arm then cancel: no reroll spent.
+await page.tap('#itemReroll');
+check('reroll arms', (await page.locator('#itemReroll.armed').count()) === 1);
+await page.tap('#itemReroll');
+check('re-tap cancels arming without consuming', (await page.locator('#itemReroll.armed').count()) === 0
+  && (await rerollCnt()) === '1');
+// Arm then tap slot 0: one reroll consumed, the piece swapped, nothing placed.
+const filledBeforeReroll = await filledCount();
+await page.tap('#itemReroll');
+await page.locator('.slot').nth(0).tap();
+await page.waitForTimeout(300);
+check('reroll consumed to 0 in the save', (await savedInv()).reroll === 0);
+check('reroll badge disabled at 0', (await page.locator('#itemReroll[disabled]').count()) === 1);
+check('reroll placed nothing on the board', (await filledCount()) === filledBeforeReroll);
 
 console.log('7k. Tutorial: full walkthrough via settings replay');
 const scoreBeforeTut = await score();
@@ -581,9 +693,31 @@ await page.locator('.slot').nth(0).locator('.rot-btn').tap();
 await page.waitForTimeout(300);
 await dragPiece(0, 4, 6);
 await page.waitForTimeout(1000);
-check('step 6 explains undo and freeze', (await page.locator('#coachText').textContent()).includes('Undo'));
-await page.tap('#coachNext');
-check('step 7 points at settings', (await page.locator('#coachText').textContent()).includes('have fun'));
+// Undo lesson: a forced trap drop, then rewind it.
+check('step 6 baits the undo trap', (await page.locator('#coachText').textContent()).includes('spoils'));
+await dragPiece(0, 4, 8); // drop the star: it clears the flower row (an 8-flower bonus = tier-2 party)
+await page.waitForTimeout(1400);
+check('step 7 teaches undo', (await page.locator('#coachText').textContent()).includes('Undo'));
+await page.tap('#itemUndo');
+await page.waitForTimeout(600);
+// Freeze lesson: arm the button, ice the piece, then place it.
+check('step 8 teaches freeze', (await page.locator('#coachText').textContent()).includes('Freeze'));
+await page.tap('#itemFreeze');
+await page.locator('.slot').nth(0).tap();
+await page.waitForTimeout(600);
+check('step 9 places the iced piece', (await page.locator('#coachText').textContent()).includes('freezes solid'));
+await dragPiece(0, 4, 8); // the iced piece freezes the row solid
+await page.waitForTimeout(900);
+check('the finished row froze instead of clearing', (await page.locator('.cell.frozen').count()) === 9);
+check('step 10 teaches the melt', (await page.locator('#coachText').textContent()).includes('melts together'));
+await dragPiece(0, 8, 2); // finish the heart column: everything melts as one combo
+await page.waitForTimeout(1600);
+// Reroll lesson: arm the button, swap the piece.
+check('step 11 teaches reroll', (await page.locator('#coachText').textContent()).includes('Reroll'));
+await page.tap('#itemReroll');
+await page.locator('.slot').nth(0).tap();
+await page.waitForTimeout(600);
+check('final step points at the score pill', (await page.locator('#coachText').textContent()).includes('have fun'));
 check('last step offers Finish', (await page.locator('#coachNext').textContent()) === 'Finish');
 await page.tap('#coachNext');
 await page.waitForTimeout(200);
@@ -657,16 +791,28 @@ check('tapping the best pill opens the leaderboard', (await page.locator('#lbPan
 await page.tap('#lbClose');
 await page.waitForTimeout(100);
 
+// Opening the leaderboard above already submitted the current best (5); clear
+// that so the next check isolates whether GAME OVER itself submits.
+submitBody = null;
 await dragPiece(0, 0, 0);
 await page.waitForSelector('#gameOver.show', { timeout: 5000 });
 await page.waitForTimeout(600);
-check('game over submits the new best', submitBody !== null && submitBody.score === 101,
+// First New Best with a live leaderboard: the submit waits for a nickname.
+check('new best defers the submit for a nickname', submitBody === null, JSON.stringify(submitBody));
+check('first new best shows the nickname prompt', (await page.locator('#nickPrompt:not([hidden])').count()) === 1);
+check('nick prompt is recorded as shown', (await page.evaluate(() =>
+  JSON.parse(localStorage.getItem('lizard-blockdoku-v1')).nickPrompted)) === true);
+// Save with an empty name: it falls back to her default name.
+await page.fill('#nickPromptInput', '');
+await page.tap('#nickPromptSave');
+await page.waitForTimeout(600);
+check('resolving the prompt submits the new best', submitBody !== null && submitBody.score === 101,
   JSON.stringify(submitBody));
 check('submit carries a UUID identity and hex secret',
   submitBody !== null
   && /^[0-9a-f-]{36}$/.test(submitBody.playerId)
   && /^[0-9a-f]{32}$/.test(submitBody.secret));
-check('submit uses her name', submitBody !== null && submitBody.name === 'Lizard');
+check('empty name falls back to Lizard', submitBody !== null && submitBody.name === 'Lizard');
 check('acceptance advances bestSubmitted',
   (await page.evaluate(() => JSON.parse(localStorage.getItem('lizard-blockdoku-lb')).bestSubmitted)) === 101);
 await page.tap('#lbGameOver');
@@ -693,6 +839,8 @@ const fit = await page.evaluate(() => {
 });
 check('tray fully visible in landscape', fit.trayBottom <= fit.vh + 1, JSON.stringify(fit));
 check('board not clipped at top in landscape', fit.boardTop >= -1, JSON.stringify(fit));
+check('items bar (with reroll) hidden in landscape', (await page.locator('#itemsBar').isVisible()) === false);
+check('reroll button still exists in the DOM', (await page.locator('#itemReroll').count()) === 1);
 await page.setViewportSize({ width: 390, height: 844 });
 await page.reload();
 await page.waitForSelector('.cell');

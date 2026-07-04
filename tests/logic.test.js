@@ -36,15 +36,19 @@ function boardWith(cells, icon = 1) {
 
 /* ---- Shape set integrity ---- */
 
-test('43 shapes, weights sum to 100', () => {
-  assert.strictEqual(G.SHAPES.length, 43);
+test('47 shapes in 16 classes, weights sum to 106', () => {
+  assert.strictEqual(G.SHAPES.length, 47);
   const total = G.SHAPES.reduce((a, s) => a + s.weight, 0);
-  assert.ok(Math.abs(total - 100) < 1e-9, 'total weight ' + total);
+  assert.ok(Math.abs(total - 106) < 1e-9, 'total weight ' + total);
 });
 
-test('expected piece size is about 3.62 cells', () => {
-  const avg = G.SHAPES.reduce((a, s) => a + s.weight * s.cells.length, 0) / 100;
-  assert.ok(Math.abs(avg - 3.62) < 0.02, 'avg ' + avg);
+test('expected piece size is 392/106 cells, derived from the weighted set', () => {
+  const totalWeight = G.SHAPES.reduce((a, s) => a + s.weight, 0);
+  const weightedCells = G.SHAPES.reduce((a, s) => a + s.weight * s.cells.length, 0);
+  assert.ok(Math.abs(totalWeight - 106) < 1e-9, 'weights sum to 106');
+  assert.ok(Math.abs(weightedCells - 392) < 1e-9, 'weighted cell total is 392 (incl. the U class)');
+  const avg = weightedCells / totalWeight;
+  assert.ok(Math.abs(avg - 392 / 106) < 1e-9, 'avg ' + avg);
 });
 
 test('every shape: unique in-bounds cells matching its bounding box', () => {
@@ -229,18 +233,18 @@ test('pickShapeId and pickIcon stay in range across seeds', () => {
   for (let i = 0; i < 5000; i++) {
     const s = G.pickShapeId(rng);
     const ic = G.pickIcon(rng);
-    assert.ok(s >= 0 && s < 43);
-    assert.ok(ic >= 0 && ic < 5);
+    assert.ok(s >= 0 && s < 47);
+    assert.ok(ic >= 0 && ic < 6);
   }
 });
 
-test('icon weights: lizard is rare (about 8%)', () => {
+test('icon weights: lizard is rare (about 6.5%)', () => {
   const rng = mulberry32(7);
   let lizards = 0;
   const trials = 20000;
   for (let i = 0; i < trials; i++) if (G.pickIcon(rng) === G.LIZARD_ICON) lizards++;
   const rate = lizards / trials;
-  assert.ok(rate > 0.06 && rate < 0.10, 'lizard rate ' + rate);
+  assert.ok(rate > 0.05 && rate < 0.08, 'lizard rate ' + rate);
 });
 
 test('genTray: 3 valid pieces, never 3 identical shapes', () => {
@@ -250,8 +254,8 @@ test('genTray: 3 valid pieces, never 3 identical shapes', () => {
     const tray = G.genTray(b, rng);
     assert.strictEqual(tray.length, 3);
     for (const p of tray) {
-      assert.ok(p.shapeId >= 0 && p.shapeId < 43);
-      assert.ok(p.icon >= 0 && p.icon < 5);
+      assert.ok(p.shapeId >= 0 && p.shapeId < 47);
+      assert.ok(p.icon >= 0 && p.icon < 6);
     }
     assert.ok(!(tray[0].shapeId === tray[1].shapeId && tray[1].shapeId === tray[2].shapeId));
   }
@@ -305,16 +309,21 @@ test('save v2 round-trip preserves everything', () => {
   const frozen = new Uint8Array(81);
   frozen[3 * 9 + 3] = 1;
   const tray = [{ ...G.makePiece(rng), frozen: true }, null, { shapeId: 1, icon: 3, rotFree: true, rotOrig: 2 }];
+  const scoreLog = [
+    G.makeScoreLogEntry(1, 2, [{ icon: 3, count: 3, points: 10, perfect: false }], [], 0, 0, 30),
+    G.makeScoreLogEntry(2, 4, [{ icon: 1, count: 4, points: 10, perfect: false }], [{ icon: 1, unitCount: 2, points: 50 }], 2, 10, 128),
+  ];
+  const streakLog = [{ n: 1, gained: 30 }, { n: 2, gained: 128 }];
   const game = G.encodeGame({
     board: b, tray, score: 123,
-    inv: { rotate: 2, undo: 1, freeze: 3 },
-    progress: { pts: 150, combos: 1 },
-    frozen, freezeHold: true,
+    inv: { rotate: 2, undo: 1, freeze: 3, reroll: 2 },
+    progress: { pts: 150, combos: 1, fcombos: 1 },
+    frozen, freezeHold: true, streak: 2, scoreLog, streakLog,
   });
   const decoded = G.validateSave(JSON.parse(JSON.stringify({
     v: 2, best: 777, muted: true, volume: 30, theme: 'dark', nickname: 'Lizard 🦎',
     seenTutorial: true, tutorialOffered: true,
-    itemHelp: { rotate: true, undo: false, freeze: true },
+    itemHelp: { rotate: true, undo: false, freeze: true, reroll: true },
     game,
   })));
   assert.strictEqual(decoded.best, 777);
@@ -324,15 +333,18 @@ test('save v2 round-trip preserves everything', () => {
   assert.strictEqual(decoded.nickname, 'Lizard 🦎');
   assert.strictEqual(decoded.seenTutorial, true);
   assert.strictEqual(decoded.tutorialOffered, true);
-  assert.deepStrictEqual(decoded.itemHelp, { rotate: true, undo: false, freeze: true });
+  assert.deepStrictEqual(decoded.itemHelp, { rotate: true, undo: false, freeze: true, reroll: true });
   assert.ok(decoded.game);
   assert.deepStrictEqual(Array.from(decoded.game.board), Array.from(b));
   assert.deepStrictEqual(decoded.game.tray, tray);
   assert.strictEqual(decoded.game.score, 123);
-  assert.deepStrictEqual(decoded.game.inv, { rotate: 2, undo: 1, freeze: 3 });
-  assert.deepStrictEqual(decoded.game.progress, { pts: 150, combos: 1 });
+  assert.deepStrictEqual(decoded.game.inv, { rotate: 2, undo: 1, freeze: 3, reroll: 2 });
+  assert.deepStrictEqual(decoded.game.progress, { pts: 150, combos: 1, fcombos: 1 });
   assert.deepStrictEqual(Array.from(decoded.game.frozen), Array.from(frozen));
   assert.strictEqual(decoded.game.freezeHold, true);
+  assert.strictEqual(decoded.game.streak, 2);
+  assert.deepStrictEqual(decoded.game.scoreLog, scoreLog);
+  assert.deepStrictEqual(decoded.game.streakLog, streakLog);
 });
 
 test('validateSave: v1 saves migrate to v2 defaults', () => {
@@ -347,10 +359,12 @@ test('validateSave: v1 saves migrate to v2 defaults', () => {
   assert.strictEqual(out.nickname, '');
   assert.strictEqual(out.seenTutorial, false);
   assert.ok(out.game, 'v1 game survives migration');
-  assert.deepStrictEqual(out.game.inv, { rotate: 0, undo: 0, freeze: 0 });
-  assert.deepStrictEqual(out.game.progress, { pts: 0, combos: 0 });
+  assert.deepStrictEqual(out.game.inv, { rotate: 0, undo: 0, freeze: 0, reroll: 0 });
+  assert.deepStrictEqual(out.game.progress, { pts: 0, combos: 0, fcombos: 0 });
   assert.strictEqual(out.game.freezeHold, false);
   assert.strictEqual(Array.from(out.game.frozen).reduce((a, x) => a + x, 0), 0);
+  assert.deepStrictEqual(out.game.scoreLog, [], 'v1 has no score history');
+  assert.deepStrictEqual(out.game.streakLog, [], 'v1 has no streak history');
 });
 
 test('validateSave: corrupt payloads keep meta, drop game', () => {
@@ -376,15 +390,35 @@ test('validateSave: corrupt payloads keep meta, drop game', () => {
 
   const bad5 = G.validateSave({ v: 1, best: -5, game: null });
   assert.strictEqual(bad5.best, 0, 'negative best rejected');
+
+  /* Butterfly is icon 5: a board value of 5 and a tray icon of 5 are now valid. */
+  const board5 = new Array(81).fill(-1);
+  board5[0] = 5;
+  const okButterfly = G.validateSave({ v: 2, best: 10, game: { board: board5, tray: [{ shapeId: 0, icon: 5 }, null, null], score: 5 } });
+  assert.ok(okButterfly.game, 'butterfly board value and tray icon accepted');
+  assert.strictEqual(okButterfly.game.board[0], 5);
+  assert.strictEqual(okButterfly.game.tray[0].icon, 5);
 });
 
 test('validateSave: hostile v2 fields', () => {
   const filled = new Array(81).fill(1);
   const base = { v: 2, best: 10, game: { board: filled.slice(), tray: [{ shapeId: 0, icon: 1 }, null, null], score: 5 } };
 
-  const overCap = G.validateSave({ ...base, game: { ...base.game, inv: { rotate: 99, undo: -3, freeze: 2 } } });
+  const overCap = G.validateSave({ ...base, game: { ...base.game, inv: { rotate: 99, undo: -3, freeze: 2, reroll: 99 } } });
   assert.ok(overCap.game);
-  assert.deepStrictEqual(overCap.game.inv, { rotate: G.ITEM_CAPS.rotate, undo: 0, freeze: 2 }, 'inv clamped to caps');
+  assert.deepStrictEqual(overCap.game.inv, { rotate: G.ITEM_CAPS.rotate, undo: 0, freeze: 2, reroll: G.ITEM_CAPS.reroll }, 'inv clamped to caps');
+
+  const negReroll = G.validateSave({ ...base, game: { ...base.game, inv: { reroll: -1 } } });
+  assert.strictEqual(negReroll.game.inv.reroll, 0, 'negative reroll floored to 0');
+  const fracReroll = G.validateSave({ ...base, game: { ...base.game, inv: { reroll: 1.5 } } });
+  assert.strictEqual(fracReroll.game, null, 'fractional reroll discards the game');
+
+  const bigFcombos = G.validateSave({ ...base, game: { ...base.game, progress: { pts: 0, combos: 0, fcombos: 9 } } });
+  assert.ok(bigFcombos.game, 'out-of-range fcombos keeps the game');
+  assert.strictEqual(bigFcombos.game.progress.fcombos, 0, 'fcombos 9 clamped to 0');
+  const strFcombos = G.validateSave({ ...base, game: { ...base.game, progress: { pts: 0, combos: 0, fcombos: '7' } } });
+  assert.ok(strFcombos.game, 'string fcombos keeps the game');
+  assert.strictEqual(strFcombos.game.progress.fcombos, 0, "fcombos '7' falls back to 0");
 
   const badFrozenIdx = G.validateSave({ ...base, game: { ...base.game, frozen: [81] } });
   assert.strictEqual(badFrozenIdx.game, null, 'frozen index out of range rejected');
@@ -535,10 +569,10 @@ test('matchingSetBonuses: row+col cross of one icon counts both units', () => {
 /* ---- Rotation ---- */
 
 test('ROTATION_MAP: total, bijective, period 4', () => {
-  assert.strictEqual(G.ROTATION_MAP.length, 43);
-  for (const t of G.ROTATION_MAP) assert.ok(Number.isInteger(t) && t >= 0 && t < 43);
-  assert.strictEqual(new Set(G.ROTATION_MAP).size, 43, 'bijection');
-  for (let id = 0; id < 43; id++) {
+  assert.strictEqual(G.ROTATION_MAP.length, 47);
+  for (const t of G.ROTATION_MAP) assert.ok(Number.isInteger(t) && t >= 0 && t < 47);
+  assert.strictEqual(new Set(G.ROTATION_MAP).size, 47, 'bijection');
+  for (let id = 0; id < 47; id++) {
     let x = id;
     for (let k = 0; k < 4; k++) x = G.ROTATION_MAP[x];
     assert.strictEqual(x, id, 'rotating 4 times returns shape ' + id);
@@ -550,6 +584,11 @@ test('ROTATION_MAP: known mappings', () => {
   assert.strictEqual(G.ROTATION_MAP[1], 2, 'Line2 H rotates to V');
   assert.strictEqual(G.ROTATION_MAP[13], 13, 'square is a fixed point');
   assert.strictEqual(G.ROTATION_MAP[38], 38, 'plus5 is a fixed point');
+  /* The U pentomino (indices 43-46) is a clockwise 4-cycle. */
+  assert.strictEqual(G.ROTATION_MAP[43], 46, 'U 43 -> 46');
+  assert.strictEqual(G.ROTATION_MAP[46], 45, 'U 46 -> 45');
+  assert.strictEqual(G.ROTATION_MAP[45], 44, 'U 45 -> 44');
+  assert.strictEqual(G.ROTATION_MAP[44], 43, 'U 44 -> 43');
 });
 
 test('rotateShapeCells matches geometry', () => {
@@ -642,13 +681,13 @@ test('applyRotation: legacy piece (rotFree, no rotOrig) never cancels', () => {
 
 /* ---- Streak bonus ---- */
 
-test('streakBonus: 25 * (k-1) ladder, zero below 2', () => {
+test('streakBonus: 10 * (k-1) ladder, zero below 2', () => {
   assert.strictEqual(G.streakBonus(0), 0);
   assert.strictEqual(G.streakBonus(1), 0);
-  assert.strictEqual(G.streakBonus(2), 25);
-  assert.strictEqual(G.streakBonus(3), 50);
-  assert.strictEqual(G.streakBonus(4), 75);
-  assert.strictEqual(G.streakBonus(10), 225);
+  assert.strictEqual(G.streakBonus(2), 10);
+  assert.strictEqual(G.streakBonus(3), 20);
+  assert.strictEqual(G.streakBonus(4), 30);
+  assert.strictEqual(G.streakBonus(10), 90);
 });
 
 test('save round-trip preserves a streak of 4', () => {
@@ -706,30 +745,82 @@ test('computeEarned: rotate every 200 points with carry', () => {
   assert.strictEqual(r.progress.pts, 1);
 });
 
-test('computeEarned: undo every 2nd multi-set combo', () => {
-  let r = G.computeEarned({ pts: 0, combos: 0 }, { gained: 0, comboN: 2, perfectCount: 0 });
+test('computeEarned: undo every 2nd multi-set combo, fcombos runs in parallel', () => {
+  let r = G.computeEarned({ pts: 0, combos: 0, fcombos: 0 }, { gained: 0, comboN: 2, perfectCount: 0 });
   assert.strictEqual(r.earned.undo, 0);
   assert.strictEqual(r.progress.combos, 1);
+  assert.strictEqual(r.progress.fcombos, 1, 'the freeze counter advances alongside undo');
+  assert.strictEqual(r.earned.freeze, 0);
   r = G.computeEarned(r.progress, { gained: 0, comboN: 2, perfectCount: 0 });
   assert.strictEqual(r.earned.undo, 1);
   assert.strictEqual(r.progress.combos, 0);
-  r = G.computeEarned({ pts: 0, combos: 0 }, { gained: 0, comboN: 1, perfectCount: 0 });
+  assert.strictEqual(r.earned.freeze, 1, 'every 2nd combo pays both an undo and a freeze');
+  assert.strictEqual(r.progress.fcombos, 0);
+  r = G.computeEarned({ pts: 0, combos: 0, fcombos: 0 }, { gained: 0, comboN: 1, perfectCount: 0 });
   assert.strictEqual(r.progress.combos, 0, 'single clear is not a combo');
+  assert.strictEqual(r.progress.fcombos, 0);
 });
 
-test('computeEarned: freeze per perfect and per x3 combo', () => {
-  let r = G.computeEarned({ pts: 0, combos: 0 }, { gained: 0, comboN: 0, perfectCount: 2 });
-  assert.strictEqual(r.earned.freeze, 2);
-  r = G.computeEarned({ pts: 0, combos: 0 }, { gained: 0, comboN: 3, perfectCount: 1 });
-  assert.strictEqual(r.earned.freeze, 2, 'perfect + x3 combo both pay');
-  assert.strictEqual(r.progress.combos, 1, 'x3 combo also counts toward undo');
+test('computeEarned: freeze economy rewrite (perfects, parallel combos, streaks)', () => {
+  /* Perfects still each pay a freeze; nothing else here does. */
+  let r = G.computeEarned({ pts: 0, combos: 0, fcombos: 0 }, { gained: 0, comboN: 0, perfectCount: 2 });
+  assert.strictEqual(r.earned.freeze, 2, 'two perfects, two freezes');
+  assert.strictEqual(r.earned.reroll, 0);
+
+  /* An x3 combo pays a reroll, NOT a freeze. */
+  r = G.computeEarned({ pts: 0, combos: 0, fcombos: 0 }, { gained: 0, comboN: 3, perfectCount: 0 });
+  assert.strictEqual(r.earned.reroll, 1, 'x3 combo pays a reroll');
+  assert.strictEqual(r.earned.freeze, 0, 'x3 combo alone pays no freeze');
+  assert.strictEqual(r.progress.combos, 1, 'x3 still counts toward undo');
+  assert.strictEqual(r.progress.fcombos, 1, 'and toward the freeze counter');
+
+  /* Two x2 combos: the parallel fcombos counter pays exactly one freeze. */
+  let acc = G.computeEarned({ pts: 0, combos: 0, fcombos: 0 }, { gained: 0, comboN: 2, perfectCount: 0 });
+  acc = G.computeEarned(acc.progress, { gained: 0, comboN: 2, perfectCount: 0 });
+  assert.strictEqual(acc.earned.freeze, 1, 'every 2nd combo pays a freeze');
+
+  /* Streak milestones only fire on a clearing turn (comboN >= 1). */
+  r = G.computeEarned({ pts: 0, combos: 0, fcombos: 0 }, { gained: 0, comboN: 1, perfectCount: 0, streak: 3 });
+  assert.strictEqual(r.earned.freeze, 1, 'a streak of 3 pays a freeze');
+  assert.strictEqual(r.earned.reroll, 0);
+
+  r = G.computeEarned({ pts: 0, combos: 0, fcombos: 0 }, { gained: 0, comboN: 1, perfectCount: 0, streak: 4 });
+  assert.strictEqual(r.earned.reroll, 1, 'a streak of 4 pays a reroll');
+  assert.strictEqual(r.earned.freeze, 0);
+
+  r = G.computeEarned({ pts: 0, combos: 0, fcombos: 0 }, { gained: 0, comboN: 1, perfectCount: 0, streak: 12 });
+  assert.strictEqual(r.earned.freeze, 1, 'streak 12 is a multiple of 3');
+  assert.strictEqual(r.earned.reroll, 1, 'and a multiple of 4');
+
+  /* A milestone streak with no clear never pays. */
+  r = G.computeEarned({ pts: 0, combos: 0, fcombos: 0 }, { gained: 0, comboN: 0, perfectCount: 0, streak: 3 });
+  assert.strictEqual(r.earned.freeze, 0, 'no clear, no streak milestone');
+  assert.strictEqual(r.earned.reroll, 0);
 });
 
-test('grantItems clamps to caps and reports what was granted', () => {
-  const inv = { rotate: 2, undo: 3, freeze: 0 };
-  const granted = G.grantItems(inv, { rotate: 3, undo: 1, freeze: 1 });
-  assert.deepStrictEqual(granted, { rotate: 1, undo: 0, freeze: 1 });
-  assert.deepStrictEqual(inv, { rotate: 3, undo: 3, freeze: 1 });
+test('computeEarned: msCombo pays a reroll and stacks with combo and streak', () => {
+  let r = G.computeEarned({ pts: 0, combos: 0, fcombos: 0 }, { gained: 0, comboN: 2, perfectCount: 0, msCombo: true });
+  assert.strictEqual(r.earned.reroll, 1, 'a Matching Sets combo pays a reroll');
+
+  /* x3 combo (+1), Matching Sets combo (+1), and a streak of 12 (+1) all stack. */
+  r = G.computeEarned({ pts: 0, combos: 0, fcombos: 0 }, { gained: 0, comboN: 3, perfectCount: 0, msCombo: true, streak: 12 });
+  assert.strictEqual(r.earned.reroll, 3, 'x3 + matching sets + x4 streak stack to three rerolls');
+  assert.strictEqual(r.earned.freeze, 1, 'the x3-multiple streak also pays one freeze');
+});
+
+test('grantItems clamps to caps, grants rerolls, and never NaNs a legacy inv', () => {
+  const inv = { rotate: 2, undo: 3, freeze: 0, reroll: 1 };
+  const granted = G.grantItems(inv, { rotate: 3, undo: 1, freeze: 1, reroll: 5 });
+  assert.deepStrictEqual(granted, { rotate: 1, undo: 0, freeze: 1, reroll: 2 });
+  assert.deepStrictEqual(inv, { rotate: 3, undo: 3, freeze: 1, reroll: 3 });
+
+  /* A legacy inventory with no reroll key must not NaN: the defensive || 0
+     treats the missing key as zero and grants up to the cap. */
+  const legacy = { rotate: 0, undo: 0, freeze: 0 };
+  const g2 = G.grantItems(legacy, { rotate: 0, undo: 0, freeze: 0, reroll: 2 });
+  assert.strictEqual(g2.reroll, 2);
+  assert.strictEqual(legacy.reroll, 2, 'reroll key created cleanly');
+  assert.ok(Number.isInteger(legacy.reroll), 'no NaN in a migrated inventory');
 });
 
 /* ---- Undo snapshot ---- */
@@ -795,6 +886,150 @@ test('simulated turn: detection reads pre-clear snapshot (cross clear)', () => {
   const bonuses = G.iconBonuses(b, units);
   assert.strictEqual(bonuses.length, 2);
   for (const bo of bonuses) assert.strictEqual(bo.points, 100);
+});
+
+/* ---- U pentomino geometry ---- */
+
+test('U pentomino: four orientations, weight 1.5, 5 cells, 2x3 boxes', () => {
+  const us = [43, 44, 45, 46].map((i) => G.SHAPES[i]);
+  for (const s of us) {
+    assert.ok(Math.abs(s.weight - 1.5) < 1e-9, 'U weight is 6/4 = 1.5');
+    assert.strictEqual(s.cells.length, 5, 'U is a pentomino');
+    assert.strictEqual([s.h, s.w].sort().join('x'), '2x3', 'each U fits a 2x3 box either way');
+  }
+  const keys = new Set(us.map((s) => s.cells.map(([r, c]) => r + ',' + c).sort().join('|')));
+  assert.strictEqual(keys.size, 4, 'four distinct orientations');
+});
+
+/* ---- Reroll ---- */
+
+test('rerollPiece: always changes the shape and stays in range', () => {
+  const rng = mulberry32(2718);
+  for (let i = 0; i < 500; i++) {
+    const piece = { shapeId: i % G.SHAPES.length, icon: 2 };
+    const next = G.rerollPiece(piece, rng);
+    assert.ok(next.shapeId >= 0 && next.shapeId < G.SHAPES.length, 'shapeId in range');
+    assert.ok(next.icon >= 0 && next.icon < G.ICONS.length, 'icon in range');
+    assert.notStrictEqual(next.shapeId, piece.shapeId, 'shape always differs');
+  }
+});
+
+test('rerollPiece: a stuck rng still nudges off the same shape', () => {
+  /* An rng pinned to 0 always picks shape 0; from shape 0 the guard must fall
+     through to the (shapeId + 1) nudge instead of returning the same shape. */
+  const stuck = () => 0;
+  const next = G.rerollPiece({ shapeId: 0, icon: 0 }, stuck);
+  assert.notStrictEqual(next.shapeId, 0, 'nudged off the stuck shape');
+  assert.strictEqual(next.shapeId, 1, 'nudge is (shapeId + 1) % SHAPES.length');
+});
+
+test('applyReroll: null when there is nothing to spend', () => {
+  const rng = mulberry32(1);
+  assert.strictEqual(G.applyReroll(null, { reroll: 3 }, rng), null, 'no piece');
+  assert.strictEqual(G.applyReroll({ shapeId: 0, icon: 1 }, { reroll: 0 }, rng), null, 'no stock');
+});
+
+test('applyReroll: consumes one reroll, swaps the piece, mutates no input', () => {
+  const rng = mulberry32(11);
+  const piece = { shapeId: 5, icon: 2 };
+  const inv = { rotate: 1, undo: 1, freeze: 1, reroll: 2 };
+  const res = G.applyReroll(piece, inv, rng);
+  assert.strictEqual(res.inv.reroll, 1, 'one reroll spent');
+  assert.notStrictEqual(res.piece.shapeId, 5, 'the shape changed');
+  assert.strictEqual(res.refundedRotate, false);
+  assert.strictEqual(res.refundedFreeze, false);
+  assert.strictEqual(inv.reroll, 2, 'the input inv is untouched');
+  assert.deepStrictEqual(piece, { shapeId: 5, icon: 2 }, 'the input piece is untouched');
+});
+
+test('applyReroll: refunds an open rotate session and a frozen coat, no flag leak', () => {
+  const rng = mulberry32(22);
+  const piece = { shapeId: 6, icon: 2, rotFree: true, rotOrig: 5, frozen: true };
+  const inv = { rotate: 0, undo: 0, freeze: 0, reroll: 1 };
+  const res = G.applyReroll(piece, inv, rng);
+  assert.strictEqual(res.refundedRotate, true);
+  assert.strictEqual(res.refundedFreeze, true);
+  assert.strictEqual(res.inv.rotate, 1, 'rotate returned');
+  assert.strictEqual(res.inv.freeze, 1, 'freeze returned');
+  assert.strictEqual(res.inv.reroll, 0);
+  assert.strictEqual(res.piece.rotFree, undefined, 'fresh piece carries no rotate session');
+  assert.strictEqual(res.piece.rotOrig, undefined);
+  assert.strictEqual(res.piece.frozen, undefined, 'fresh piece is not iced');
+});
+
+test('applyReroll: refunds clamp at the caps and report false when full', () => {
+  const rng = mulberry32(33);
+  const piece = { shapeId: 6, icon: 2, rotFree: true, rotOrig: 5, frozen: true };
+  const inv = { rotate: G.ITEM_CAPS.rotate, undo: 0, freeze: G.ITEM_CAPS.freeze, reroll: 1 };
+  const res = G.applyReroll(piece, inv, rng);
+  assert.strictEqual(res.inv.rotate, G.ITEM_CAPS.rotate, 'rotate stays at cap');
+  assert.strictEqual(res.inv.freeze, G.ITEM_CAPS.freeze, 'freeze stays at cap');
+  assert.strictEqual(res.refundedRotate, false, 'nothing actually returned');
+  assert.strictEqual(res.refundedFreeze, false);
+});
+
+/* ---- Score / streak history ---- */
+
+test('validateSave: history is lenient and never discards the game', () => {
+  const filled = new Array(81).fill(1);
+  const mkGame = (extra) => ({ board: filled.slice(), tray: [{ shapeId: 0, icon: 1 }, null, null], score: 5, streak: 3, ...extra });
+
+  /* Junk in either log becomes an empty array; the game survives. */
+  const junk = G.validateSave({ v: 2, best: 1, game: mkGame({ scoreLog: 'nope', streakLog: 42 }) });
+  assert.ok(junk.game, 'junk history keeps the game');
+  assert.deepStrictEqual(junk.game.scoreLog, []);
+  assert.deepStrictEqual(junk.game.streakLog, []);
+
+  /* Over-long logs are capped to their most recent entries. */
+  const many = [];
+  for (let i = 0; i < 10; i++) many.push(G.makeScoreLogEntry(1, 2, [], [], 0, 0, 20 + i));
+  const manyStreak = [];
+  for (let i = 0; i < 20; i++) manyStreak.push({ n: 1, gained: 20 + i });
+  const capped = G.validateSave({ v: 2, best: 1, game: mkGame({ scoreLog: many, streakLog: manyStreak }) });
+  assert.strictEqual(capped.game.scoreLog.length, G.SCORE_LOG_MAX, 'score log capped');
+  assert.strictEqual(capped.game.scoreLog[capped.game.scoreLog.length - 1].total, 29, 'newest score kept');
+  assert.strictEqual(capped.game.streakLog.length, G.STREAK_LOG_MAX, 'streak log capped');
+
+  /* A single bad entry is dropped; its good siblings survive in order. */
+  const mixed = [
+    G.makeScoreLogEntry(2, 4, [], [], 2, 10, 100),
+    { n: 999, placement: 0, streakK: 0, streakPts: 0, total: 5, icons: [], ms: [] },
+    G.makeScoreLogEntry(1, 3, [], [], 0, 0, 21),
+  ];
+  const dropped = G.validateSave({ v: 2, best: 1, game: mkGame({ scoreLog: mixed }) });
+  assert.strictEqual(dropped.game.scoreLog.length, 2, 'bad entry dropped, siblings kept');
+  assert.deepStrictEqual(dropped.game.scoreLog.map((e) => e.total), [100, 21]);
+
+  /* clear is always recomputed from n, never trusted from disk. */
+  const tampered = G.validateSave({ v: 2, best: 1, game: mkGame({
+    scoreLog: [{ n: 2, placement: 4, clear: 99999, streakK: 0, streakPts: 0, total: 100, icons: [], ms: [] }],
+  }) });
+  assert.strictEqual(tampered.game.scoreLog[0].clear, G.clearScore(2), 'clear recomputed from n');
+
+  /* No live streak forces the streak log empty regardless of what is on disk. */
+  const cold = G.validateSave({ v: 2, best: 1, game: mkGame({ streak: 0, streakLog: [{ n: 1, gained: 5 }] }) });
+  assert.deepStrictEqual(cold.game.streakLog, [], 'a cold streak keeps no rows');
+});
+
+test('takeSnapshot deep-copies the score and streak logs', () => {
+  const entry = G.makeScoreLogEntry(2, 4,
+    [{ icon: 1, count: 3, points: 10, perfect: false }],
+    [{ icon: 1, unitCount: 2, points: 50 }], 2, 10, 128);
+  const state = {
+    board: G.emptyBoard(), tray: [null, null, null], score: 0,
+    inv: { rotate: 0, undo: 0, freeze: 0, reroll: 0 }, progress: { pts: 0, combos: 0, fcombos: 0 },
+    frozen: new Uint8Array(81), freezeHold: false, streak: 2,
+    scoreLog: [entry], streakLog: [{ n: 2, gained: 128 }],
+  };
+  const snap = G.takeSnapshot(state);
+  state.scoreLog.push(entry);
+  state.scoreLog[0].total = -1;
+  state.scoreLog[0].icons[0].count = 9;
+  state.streakLog[0].gained = -1;
+  assert.strictEqual(snap.scoreLog.length, 1, 'array copied');
+  assert.strictEqual(snap.scoreLog[0].total, 128, 'entry copied');
+  assert.strictEqual(snap.scoreLog[0].icons[0].count, 3, 'nested icon objects copied');
+  assert.strictEqual(snap.streakLog[0].gained, 128, 'streak row copied');
 });
 
 /* ---- Report ---- */
