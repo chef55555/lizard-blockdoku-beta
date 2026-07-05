@@ -1017,18 +1017,21 @@ header { text-align: center; height: 56px; flex: none; }
    of the glyph), so the icon's own spin/scale never drags it into a stick.
    Reached only from perfectFx (tier 2+), which never runs under reduced motion,
    so no extra gate is needed. ---- */
-.pfx-mark {
-  width: calc(var(--cell) * 0.34);
+.pfx-streak {
   height: calc(var(--cell) * 0.34);
-  border-radius: 50%;
-  filter: blur(2px);
-  transform: translate(-50%, -50%) scale(0);
-  animation: pfx-mark 750ms ease-out var(--delay, 0ms) both;
+  width: var(--len, 300px);
+  margin-top: calc(var(--cell) * -0.17); /* center the streak on the origin cell */
+  transform-origin: 0 50%;               /* grow from the origin end, outward */
+  transform: rotate(var(--ang, 0deg)) scaleX(0);
+  border-radius: 999px;
+  filter: blur(1.5px);
+  background: linear-gradient(90deg, transparent, #9b59b6, #3498db, #2ecc71, #f1c40f, #e67e22, #e74c3c);
+  animation: pfx-streak var(--dur, 1600ms) ease-in var(--delay, 0ms) both;
 }
-@keyframes pfx-mark {
-  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
-  35%  { opacity: 0.95; transform: translate(-50%, -50%) scale(1); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+@keyframes pfx-streak {
+  0%   { opacity: 0; transform: rotate(var(--ang, 0deg)) scaleX(0); }
+  20%  { opacity: 0.9; }
+  100% { opacity: 0; transform: rotate(var(--ang, 0deg)) scaleX(1); }
 }
 
 /* Butterfly also sweeps a translucent rainbow wave up the whole screen. */

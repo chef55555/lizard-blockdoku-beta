@@ -69,9 +69,6 @@ function initUI() {
      sweep) and how many perfect units get their own flourish in one clear. */
   const PERFECT_MS = [2200, 2100, 2200, 1000, 1500, 2200]; /* by icon index */
   const PERFECT_UNIT_CAP = 3;
-  /* Rainbow colors dropped as a lagging trail behind a flying perfect-match icon
-     (one dot per color, strung along its path). */
-  const TRAIL_COLORS = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#3498db', '#9b59b6'];
 
   const COMBO_PHRASES = { 2: 'So cute!', 3: 'Gorgeous!', 4: 'Queen Lizard!' };
   const COMBO_LEGENDARY = 'LEGENDARY LIZARD!!';
@@ -1295,24 +1292,24 @@ function initUI() {
     }
     el.addEventListener('animationend', (e) => { if (e.target === el) el.remove(); });
 
-    /* The star (radial streak) and berry (burst) keep their own effects; the
-       flying icons drop a LAGGING rainbow trail: rainbow dots at fixed points
-       along the path, lighting up in sequence as the icon passes and fading
-       where it was. Separate elements, so the icon's spin/scale never drags
-       them into a stick. */
+    /* The star (radial streak) and berry (burst) keep their own effects. The
+       flying icons get a CONTINUOUS rainbow streak that grows from where the
+       icon started, along its travel direction, tracing the whole path off the
+       screen behind it (the star's technique, generalized to any direction).
+       It is a SEPARATE element, so the glyph's own spin/scale never drags or
+       rotates it. */
     if (icon === 3 || icon === 4) return el;
+    const streak = document.createElement('span');
+    streak.className = 'pfx pfx-streak';
+    streak.style.left = x + 'px';
+    streak.style.top = y + 'px';
+    streak.style.setProperty('--len', (Math.hypot(dxN, dyN) | 0) + 'px');
+    streak.style.setProperty('--ang', (Math.atan2(dyN, dxN) * 180 / Math.PI).toFixed(1) + 'deg');
+    streak.style.setProperty('--dur', durN + 'ms');
+    streak.style.setProperty('--delay', el.style.getPropertyValue('--delay'));
+    streak.addEventListener('animationend', (e) => { if (e.target === streak) streak.remove(); });
     const frag = document.createDocumentFragment();
-    for (let m = 0; m < TRAIL_COLORS.length; m++) {
-      const f = (m + 1) / (TRAIL_COLORS.length + 1); /* fraction along the path */
-      const mark = document.createElement('span');
-      mark.className = 'pfx pfx-mark';
-      mark.style.left = (x + dxN * f) + 'px';
-      mark.style.top = (y + dyN * f) + 'px';
-      mark.style.background = TRAIL_COLORS[m];
-      mark.style.setProperty('--delay', ((base + f * durN * 0.6) | 0) + 'ms');
-      mark.addEventListener('animationend', (e) => { if (e.target === mark) mark.remove(); });
-      frag.appendChild(mark);
-    }
+    frag.appendChild(streak);
     frag.appendChild(el);
     return frag;
   }
