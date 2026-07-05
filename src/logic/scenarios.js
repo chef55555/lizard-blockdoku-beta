@@ -151,6 +151,32 @@ function buildCombo3(rng) {
   };
 }
 
+/* One gap per row, column, and box (nine scattered cells, none adjacent): no
+   unit starts complete, yet the tray's ICY (dipped) Single completes a row +
+   column + box wherever it lands. Its partners are two Line2s that fit nowhere
+   on the scattered gaps, so the icy Single is the only legal move. Dropping it
+   FREEZES the crossed sets (dipped) instead of clearing them; the Line2s still
+   fit nowhere, so the held freeze force-melts to rescue the game. The melt
+   pays three Perfect sets at once, earning a flurry of items, which is exactly
+   the toast pile-up the rescue notice has to ride over. NO Reroll in the
+   pocket, or the dead end would be rescued instead of melting. Uniform icon so
+   every crossed set is a Perfect. */
+const FREEZE_RESCUE_GAPS = [
+  [0, 0], [1, 3], [2, 6], [3, 1], [4, 4], [5, 7], [6, 2], [7, 5], [8, 8],
+];
+function buildFreezeRescue() {
+  const icon = themeIcon(STAR);
+  const board = emptyBoard();
+  const gaps = new Set(FREEZE_RESCUE_GAPS.map(([r, c]) => idx(r, c)));
+  for (let i = 0; i < 81; i++) if (!gaps.has(i)) board[i] = icon;
+  return {
+    board,
+    tray: [{ shapeId: 0, icon, frozen: true }, { shapeId: 1, icon }, { shapeId: 1, icon }],
+    inv: { rotate: 0, flip: 0, undo: 0, freeze: 0, reroll: 0 },
+    score: 0,
+  };
+}
+
 const SCENARIOS = [
   {
     id: 'perfect1',
@@ -191,6 +217,13 @@ const SCENARIOS = [
     target: { slot: 0, row: 7, col: 7 },
     expect: { units: 3, perfectCount: 0, msUnits: 0, gameOverAfter: false },
     build: buildCombo3,
+  },
+  {
+    /* Freeze force-melt rescue: no target/expect (the promise is a freeze then
+       a force-melt, not a plain clear); the dedicated logic test covers it. */
+    id: 'freezeRescue',
+    label: '1 move from a freeze rescue',
+    build: buildFreezeRescue,
   },
 ];
 

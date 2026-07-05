@@ -963,7 +963,9 @@ function initUI() {
          At a true game over the game-over card speaks for itself, so only the
          rescue is announced. */
       if (!over && !tutorial) {
-        showToast('melt-toast', '❄️ Board full! Frozen combo melted to save you  +' + melt.gained);
+        /* Pinned + a longer hold: a big melt earns a flurry of item toasts
+           right after, and this explainer must ride over them, not get bumped. */
+        showToast('melt-toast', '❄️ Board full! Frozen combo melted to save you  +' + melt.gained, { pin: true, ttl: 7000 });
       }
     }
 
@@ -1271,6 +1273,7 @@ function initUI() {
   function showToast(cls, content, opts) {
     const t = document.createElement('div');
     t.className = 'toast ' + cls;
+    if (opts && opts.pin) t.dataset.pinned = '1';
     if (typeof content === 'string') t.textContent = content;
     else t.appendChild(content);
     t.addEventListener('pointerup', () => {
@@ -1278,7 +1281,10 @@ function initUI() {
       dismissToast(t, true);
     });
     const live = Array.from(toastLayer.children).filter((x) => !x.dataset.leaving);
-    if (live.length >= MAX_TOASTS) dismissToast(live[0], true);
+    /* Over the cap, evict the oldest UNPINNED toast, so a pinned notice (the
+       freeze force-melt rescue) is not bumped off by the reward toasts that
+       immediately follow it. Fall back to the oldest if every toast is pinned. */
+    if (live.length >= MAX_TOASTS) dismissToast(live.find((x) => !x.dataset.pinned) || live[0], true);
     toastLayer.appendChild(t);
     t._ttl = setTimeout(() => dismissToast(t, false), (opts && opts.ttl) || TOAST_HOLD);
     return t;

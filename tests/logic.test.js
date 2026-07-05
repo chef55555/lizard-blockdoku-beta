@@ -1699,6 +1699,37 @@ test('scenarios: combo3 completes a row, a column, and a box', () => {
   assert.deepStrictEqual(types, ['box', 'col', 'row']);
 });
 
+test('scenarios: freezeRescue is a forced icy move that force-melts and rescues', () => {
+  const st = G.buildScenario('freezeRescue', mulberry32(3));
+  assert.strictEqual(G.scanUnits(st.board).length, 0, 'no set starts complete');
+
+  const icy = st.tray[0];
+  const partner = st.tray[1];
+  assert.strictEqual(icy.frozen, true, 'slot 0 is pre-dipped (icy)');
+  assert.strictEqual(st.inv.reroll, 0, 'no Reroll, or the dead end would be rescued not melted');
+
+  /* The Line2 partner fits nowhere on the scattered gaps, so the icy Single is
+     the only legal move, and it lands a row + column + box wherever it goes. */
+  assert.strictEqual(G.fitsSomewhere(st.board, G.SHAPES[partner.shapeId]), false, 'the partner fits nowhere yet');
+  assert.strictEqual(G.fitsSomewhere(st.board, G.SHAPES[icy.shapeId]), true, 'the icy Single fits');
+
+  G.placePiece(st.board, G.SHAPES[icy.shapeId], 0, 0, icy.icon);
+  const units = G.scanUnits(st.board);
+  assert.strictEqual(units.length, 3, 'a row, a column, and a box complete');
+  const { didFreeze } = G.freezeOutcome(true, false, G.unionCells(units), new Uint8Array(81));
+  assert.strictEqual(didFreeze, true, 'the dipped placement freezes the crossed sets');
+
+  /* The partner still fits nowhere and no item can save it, so the held freeze
+     force-melts (paying every crossed set as one combo) to rescue the game. */
+  const after = [null, st.tray[1], st.tray[2]];
+  assert.strictEqual(G.isGameOver(st.board, after), true, 'the partners fit nowhere');
+  assert.strictEqual(
+    G.isGameOverWithItems(st.board, after, st.inv.rotate, st.inv.reroll, st.inv.flip), true, 'no item rescues it');
+  const bonuses = G.iconBonuses(st.board, units);
+  const gained = G.clearScore(units.length) + bonuses.reduce((a, b) => a + b.points, 0);
+  assert.ok(gained > 0, 'the force-melt pays a combo');
+});
+
 test('scenarios honor the beta icon and class filters', () => {
   const rng = mulberry32(777);
   try {
