@@ -69,6 +69,9 @@ function initUI() {
      sweep) and how many perfect units get their own flourish in one clear. */
   const PERFECT_MS = [2200, 2100, 2200, 1000, 1500, 2200]; /* by icon index */
   const PERFECT_UNIT_CAP = 3;
+  /* Rainbow colors dropped as a lagging trail behind a flying perfect-match icon
+     (one dot per color, strung along its path). */
+  const TRAIL_COLORS = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#3498db', '#9b59b6'];
 
   const COMBO_PHRASES = { 2: 'So cute!', 3: 'Gorgeous!', 4: 'Queen Lizard!' };
   const COMBO_LEGENDARY = 'LEGENDARY LIZARD!!';
@@ -1212,17 +1215,18 @@ function initUI() {
     el.style.left = x + 'px';
     el.style.top = y + 'px';
     let inner = null;
+    let dxN = 0, dyN = 0, durN = 0; /* net travel + flight time, for the rainbow trail */
     if (icon === 0) {
       /* Lizard: scurry across the whole viewport and off the near edge. */
       const right = rng() < 0.5;
-      const dx = (right ? (vw - x + 80) : -(x + 80)) | 0;
+      dxN = (right ? (vw - x + 80) : -(x + 80)) | 0;
+      dyN = (rng() * 120 - 60) | 0;
+      durN = (1400 + rng() * 800) | 0;
       el.classList.add('pfx-lizard');
-      if (!right) el.classList.add('go-left');
-      el.style.setProperty('--dx', dx + 'px');
-      el.style.setProperty('--trail', Math.abs(dx) + 'px'); /* length of the rainbow track it leaves */
-      el.style.setProperty('--dy', ((rng() * 120 - 60) | 0) + 'px');
+      el.style.setProperty('--dx', dxN + 'px');
+      el.style.setProperty('--dy', dyN + 'px');
       el.style.setProperty('--face', (right ? 90 : -90) + 'deg');
-      el.style.setProperty('--dur', ((1400 + rng() * 800) | 0) + 'ms');
+      el.style.setProperty('--dur', durN + 'ms');
       el.style.setProperty('--delay', ((base + rng() * 250) | 0) + 'ms');
       inner = document.createElement('span');
     } else if (icon === 1) {
@@ -1230,16 +1234,21 @@ function initUI() {
          wind reaches first (nearest its source edge) leave first. */
       const fromLeft = gust > 0;
       const along = fromLeft ? x : (vw - x);
+      dxN = gust | 0;
+      dyN = -34; /* pfx-blow ends slightly above where it started */
+      durN = (1500 + rng() * 600) | 0;
       el.classList.add('pfx-flower');
-      if (!fromLeft) el.classList.add('wind-left'); /* flip the rainbow gust streak */
-      el.style.setProperty('--dx', (gust | 0) + 'px');
-      el.style.setProperty('--dur', ((1500 + rng() * 600) | 0) + 'ms');
+      el.style.setProperty('--dx', dxN + 'px');
+      el.style.setProperty('--dur', durN + 'ms');
       el.style.setProperty('--delay', ((base + (along / vw) * 350) | 0) + 'ms');
     } else if (icon === 2) {
       /* Heart: inflate into a balloon and float off the top. */
+      dxN = 10;
+      dyN = -(y + cellPx * 2 + 60) | 0;
+      durN = (1900 + rng() * 300) | 0;
       el.classList.add('pfx-heart');
-      el.style.setProperty('--dy', (-(y + cellPx * 2 + 60) | 0) + 'px');
-      el.style.setProperty('--dur', ((1900 + rng() * 300) | 0) + 'ms');
+      el.style.setProperty('--dy', dyN + 'px');
+      el.style.setProperty('--dur', durN + 'ms');
       el.style.setProperty('--delay', ((base + k * 40) | 0) + 'ms');
     } else if (icon === 3) {
       /* Star: shoot radially out from the board center with a rainbow trail. */
@@ -1265,11 +1274,14 @@ function initUI() {
     } else {
       /* Butterfly: zigzag up and away off the top, wings flapping. */
       const dir = rng() < 0.5 ? -1 : 1;
+      dxN = (dir * rng() * vw * 0.4) | 0;
+      dyN = -(y + cellPx * 2 + 80) | 0;
+      durN = (1900 + rng() * 300) | 0;
       el.classList.add('pfx-butterfly');
-      el.style.setProperty('--dx', ((dir * rng() * vw * 0.4) | 0) + 'px');
-      el.style.setProperty('--dy', (-(y + cellPx * 2 + 80) | 0) + 'px');
+      el.style.setProperty('--dx', dxN + 'px');
+      el.style.setProperty('--dy', dyN + 'px');
       el.style.setProperty('--sway', (((30 + rng() * 50) * (rng() < 0.5 ? -1 : 1)) | 0) + 'px');
-      el.style.setProperty('--dur', ((1900 + rng() * 300) | 0) + 'ms');
+      el.style.setProperty('--dur', durN + 'ms');
       el.style.setProperty('--delay', ((base + k * 50) | 0) + 'ms');
       inner = document.createElement('span');
     }
@@ -1282,7 +1294,27 @@ function initUI() {
       el.textContent = currentIcons()[icon];
     }
     el.addEventListener('animationend', (e) => { if (e.target === el) el.remove(); });
-    return el;
+
+    /* The star (radial streak) and berry (burst) keep their own effects; the
+       flying icons drop a LAGGING rainbow trail: rainbow dots at fixed points
+       along the path, lighting up in sequence as the icon passes and fading
+       where it was. Separate elements, so the icon's spin/scale never drags
+       them into a stick. */
+    if (icon === 3 || icon === 4) return el;
+    const frag = document.createDocumentFragment();
+    for (let m = 0; m < TRAIL_COLORS.length; m++) {
+      const f = (m + 1) / (TRAIL_COLORS.length + 1); /* fraction along the path */
+      const mark = document.createElement('span');
+      mark.className = 'pfx pfx-mark';
+      mark.style.left = (x + dxN * f) + 'px';
+      mark.style.top = (y + dyN * f) + 'px';
+      mark.style.background = TRAIL_COLORS[m];
+      mark.style.setProperty('--delay', ((base + f * durN * 0.6) | 0) + 'ms');
+      mark.addEventListener('animationend', (e) => { if (e.target === mark) mark.remove(); });
+      frag.appendChild(mark);
+    }
+    frag.appendChild(el);
+    return frag;
   }
 
   /* Full-screen rainbow wave for a butterfly Perfect Match. Only reached from

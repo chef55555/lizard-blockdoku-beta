@@ -616,6 +616,7 @@ console.log('7j. Tier-4 celebration: triple perfect flourish');
 await dragPiece(0, 0, 8);
 await page.waitForTimeout(350);
 check('triple perfect flies as flower flourishes', (await page.locator('#perfectLayer .pfx-flower').count()) > 0);
+check('flying perfect leaves a lagging rainbow trail', (await page.locator('#perfectLayer .pfx-mark').count()) > 0);
 check('perfect cells skip the generic march', (await page.locator('.fx-march').count()) === 0);
 await page.waitForSelector('#itemHelp:not([hidden])', { timeout: 6000 });
 check('x3 haul first-earns Rotate', (await page.locator('#itemHelpTitle').textContent()).includes('Rotate'));

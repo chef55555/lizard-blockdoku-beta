@@ -1009,78 +1009,29 @@ header { text-align: center; height: 56px; flex: none; }
   to   { transform: scaleX(0.35); }
 }
 
-/* ---- v2.5 rainbow signatures: each icon keeps its motion and gains a rainbow
-   accent. Reached only from perfectFx (Perfect Match, tier 2+), which never runs
-   under reduced motion, so these need no extra gate. ---- */
-:root {
-  --rainbow-h: linear-gradient(90deg, #e74c3c, #e67e22, #f1c40f, #2ecc71, #3498db, #9b59b6);
-  --rainbow-v: linear-gradient(180deg, transparent, #9b59b6, #3498db, #2ecc71, #f1c40f, #e67e22, #e74c3c);
+/* ---- v2.5 rainbow signatures. The star's radial streak and the strawberry's
+   burst keep their own .pfx-* rules above. The flying icons (lizard, flower,
+   heart, butterfly) instead drop a LAGGING rainbow trail: a line of rainbow
+   dots left at fixed points along the path, lighting up in sequence as the icon
+   passes and fading where it was. Each dot is a SEPARATE element (not a child
+   of the glyph), so the icon's own spin/scale never drags it into a stick.
+   Reached only from perfectFx (tier 2+), which never runs under reduced motion,
+   so no extra gate is needed. ---- */
+.pfx-mark {
+  width: calc(var(--cell) * 0.34);
+  height: calc(var(--cell) * 0.34);
+  border-radius: 50%;
+  filter: blur(2px);
+  transform: translate(-50%, -50%) scale(0);
+  animation: pfx-mark 750ms ease-out var(--delay, 0ms) both;
+}
+@keyframes pfx-mark {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
+  35%  { opacity: 0.95; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
 }
 
-/* Heart: a rainbow ribbon trails below the rising balloon. */
-.pfx-heart::before {
-  content: '';
-  position: absolute;
-  left: 50%; bottom: 45%;
-  width: calc(var(--cell) * 0.22);
-  height: calc(var(--cell) * 2.6);
-  transform: translateX(-50%) scaleY(0);
-  transform-origin: 50% 0;
-  border-radius: 999px;
-  filter: blur(1px);
-  background: var(--rainbow-v);
-  animation: pfx-ribbon var(--dur, 2000ms) ease-in var(--delay, 0ms) both;
-}
-@keyframes pfx-ribbon {
-  0%   { opacity: 0; transform: translateX(-50%) scaleY(0); }
-  22%  { opacity: 0.85; }
-  100% { opacity: 0; transform: translateX(-50%) scaleY(1); }
-}
-
-/* Flower: a rainbow gust streak stretches along the wind as the blossoms blow. */
-.pfx-flower::before {
-  content: '';
-  position: absolute;
-  left: 50%; top: 50%;
-  width: calc(var(--cell) * 2.6);
-  height: calc(var(--cell) * 0.24);
-  transform: translateY(-50%) scaleX(0);
-  transform-origin: 0 50%;
-  border-radius: 999px;
-  filter: blur(1px);
-  opacity: 0;
-  background: var(--rainbow-h);
-  animation: pfx-gust var(--dur, 1700ms) cubic-bezier(0.3, 0, 0.5, 1) var(--delay, 0ms) both;
-}
-.pfx-flower.wind-left::before { left: auto; right: 50%; transform-origin: 100% 50%; }
-@keyframes pfx-gust {
-  0%   { opacity: 0; transform: translateY(-50%) scaleX(0); }
-  30%  { opacity: 0.8; transform: translateY(-50%) scaleX(0.6); }
-  100% { opacity: 0; transform: translateY(-50%) scaleX(1); }
-}
-
-/* Lizard: leaves a dashed rainbow track (footprints) along its scurry. */
-.pfx-lizard::before {
-  content: '';
-  position: absolute;
-  right: 50%; top: 62%;
-  width: var(--trail, 300px);
-  height: calc(var(--cell) * 0.16);
-  transform: translateY(-50%) scaleX(0);
-  transform-origin: 100% 50%;
-  border-radius: 999px;
-  opacity: 0;
-  background: repeating-linear-gradient(90deg, #e74c3c 0 10%, #f1c40f 10% 20%, #2ecc71 20% 30%, #3498db 30% 40%, #9b59b6 40% 50%, transparent 50% 62%);
-  animation: pfx-tracks var(--dur, 1600ms) ease-in var(--delay, 0ms) both;
-}
-.pfx-lizard.go-left::before { right: auto; left: 50%; transform-origin: 0 50%; }
-@keyframes pfx-tracks {
-  0%   { opacity: 0; transform: translateY(-50%) scaleX(0); }
-  25%  { opacity: 0.7; }
-  100% { opacity: 0.45; transform: translateY(-50%) scaleX(1); }
-}
-
-/* Butterfly: a translucent rainbow wave sweeps up the whole screen. */
+/* Butterfly also sweeps a translucent rainbow wave up the whole screen. */
 .rainbow-wave {
   position: absolute;
   left: 0; right: 0;
