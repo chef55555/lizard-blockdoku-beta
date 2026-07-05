@@ -3,6 +3,13 @@
 
 const RELEASE_NOTES = [
   {
+    version: 'v2.5',
+    date: '2026-07-05',
+    notes: [
+      'Reach the top faster: as you drag a piece upward it now leads further ahead of your finger, so you barely have to move to place along the top rows.',
+    ],
+  },
+  {
     version: 'v2.4',
     date: '2026-07-04',
     notes: [

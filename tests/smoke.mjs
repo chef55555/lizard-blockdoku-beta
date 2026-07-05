@@ -33,6 +33,7 @@ const context = await browser.newContext({
 
 const consoleErrors = [];
 const page = await context.newPage();
+await page.addInitScript(() => { window.__NO_DRAG_ACCEL__ = true; }); // test the plain finger->cell mapping
 page.on('console', (msg) => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
 page.on('pageerror', (err) => consoleErrors.push('pageerror: ' + err.message));
 

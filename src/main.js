@@ -49,6 +49,13 @@ function initUI() {
   const SNAPBACK_MS = 150;
   const GAMEOVER_DELAY = 600;
   const GHOST_LIFT = 70;          /* px the ghost floats above the finger */
+  /* Vertical drag acceleration (Blockudoku-style): the further UP the finger
+     rises from where the drag began, the further the piece leads above it, so
+     the piece reaches the top rows with far less finger travel. Horizontal is
+     untouched. Tunable by feel on a real device. Tests set
+     window.__NO_DRAG_ACCEL__ to exercise the plain finger->cell mapping. */
+  const ACCEL_GAIN = 0.7;         /* extra lift per px the finger has risen */
+  const ACCEL_MAX_CELLS = 3;      /* cap the boost at this many cells */
   /* Brief ease-out at pickup so the piece flows out of its tray slot instead
      of teleporting; after this the ghost sits exactly on the finger target. */
   const PICKUP_BLEND_MS = 90;
@@ -505,9 +512,15 @@ function initUI() {
   /* Where the ghost WANTS to be: centered on the finger, lifted above it.
      All drop targeting derives from this, never from the lagging ghost. */
   function ghostTargetPos() {
+    /* Extra lift grows with how far the finger has risen since pickup (never
+       below the base lift; moving back down just relaxes toward it). Both the
+       visual ghost and the drop anchor read this, so they stay in lockstep. */
+    const rise = Math.max(0, drag.startY - drag.py);
+    const noAccel = typeof window !== 'undefined' && window.__NO_DRAG_ACCEL__;
+    const accelLift = noAccel ? 0 : Math.min(cellPx * ACCEL_MAX_CELLS, rise * ACCEL_GAIN);
     return {
       x: drag.px - drag.ghostW / 2,
-      y: drag.py - drag.ghostH - GHOST_LIFT,
+      y: drag.py - drag.ghostH - GHOST_LIFT - accelLift,
     };
   }
 

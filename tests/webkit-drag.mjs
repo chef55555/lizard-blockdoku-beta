@@ -20,6 +20,7 @@ let failures = 0;
 const browser = await webkit.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
 const page = await context.newPage();
+await page.addInitScript(() => { window.__NO_DRAG_ACCEL__ = true; }); // test the plain finger->cell mapping
 
 async function inject() {
   await page.goto(BASE + '/tools/icon-maker.html');

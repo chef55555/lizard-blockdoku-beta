@@ -17,6 +17,7 @@ function check(name, ok, extra) {
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
 const page = await context.newPage();
+await page.addInitScript(() => { window.__NO_DRAG_ACCEL__ = true; }); // plain finger->cell mapping while driving the tutorial
 const consoleErrors = [];
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
 page.on('pageerror', (e) => consoleErrors.push('pageerror: ' + e.message));
