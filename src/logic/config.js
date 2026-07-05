@@ -12,7 +12,7 @@ const SAVE_KEY = IS_BETA ? 'lizard-blockdoku-beta' : 'lizard-blockdoku-v1';
    APP_BUILD must be bumped together with the sw.js CACHE version on every
    deploy: they are numerically aligned (build 13 = cache v13). */
 const APP_VERSION = 'v2.5';
-const APP_BUILD = 36;
+const APP_BUILD = 37;
 
 /* Global leaderboard endpoint (Lambda Function URL). Only enabled when the
    game is served from github.io: the API's CORS is pinned to that origin,
@@ -28,7 +28,7 @@ const LB_KEY = 'lizard-blockdoku-lb';
 /* Test switch: when true the beta may submit real scores. Kept off so beta
    playtesting never pollutes the real board (flipped on once, 2026-07-03,
    to verify the live pipeline end to end). */
-const BETA_LB_SUBMITS = true; /* TEMP: on so beta can test the leaderboard end to end. Flip back to false when testing is done. */
+const BETA_LB_SUBMITS = false;
 
 /* Beta perk, permanent by design: fresh beta games start with one of each
    item so end-state rescues and item flows are always easy to test.
