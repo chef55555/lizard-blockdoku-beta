@@ -7,7 +7,8 @@ import { RELEASE_NOTES } from './release-notes.js';
 
 const {
   PLAYER_NAME, IS_BETA, SAVE_KEY, APP_VERSION, APP_BUILD, LEADERBOARD_URL,
-  LB_KEY, BETA_LB_SUBMITS, BETA_STARTER_ITEMS, ICONS, ICON_LABELS,
+  LB_KEY, BETA_LB_SUBMITS, BETA_STARTER_ITEMS, ICONS, ICON_SETS, currentIcons,
+  setActiveIconSet, iconSetIds, ICON_LABELS,
   LIZARD_ICON, N, CELL_COUNT, SHAPES, emptyBoard, canPlace, fitsSomewhere,
   placePiece, scanUnits, unionCells, clearScore, streakBonus,
   iconBonuses, matchingSetBonuses, ITEM_CAPS,
@@ -296,7 +297,7 @@ function initUI() {
     cell.classList.toggle('frozen', icon >= 0 && !!frozen[idx]);
     if (icon >= 0) {
       cell.classList.add('filled');
-      ic.textContent = ICONS[icon];
+      ic.textContent = currentIcons()[icon];
     } else {
       cell.classList.remove('filled');
       ic.textContent = '';
@@ -318,7 +319,7 @@ function initUI() {
           d.className = 'pcell';
           const ic = document.createElement('span');
           ic.className = 'ic';
-          ic.textContent = ICONS[piece.icon];
+          ic.textContent = currentIcons()[piece.icon];
           d.appendChild(ic);
         }
         el.appendChild(d);
@@ -636,7 +637,7 @@ function initUI() {
       const idx = (row + dr) * N + col + dc;
       const cell = cellEls[idx];
       cell.classList.add('preview');
-      cell.firstChild.textContent = ICONS[drag.piece.icon];
+      cell.firstChild.textContent = currentIcons()[drag.piece.icon];
       drag.previewCells.push(idx);
     }
     /* Will-clear glow: simulate the placement and reuse the unit scan. A
@@ -914,7 +915,7 @@ function initUI() {
       const { idx, icon } = placedRender[k];
       const cell = cellEls[idx];
       cell.classList.add('filled', 'pop');
-      cell.firstChild.textContent = ICONS[icon];
+      cell.firstChild.textContent = currentIcons()[icon];
       cell.style.animationDelay = (reducedMotion ? 0 : k * POP_STAGGER) + 'ms';
     }
     updateScoreDisplay();
@@ -1099,7 +1100,7 @@ function initUI() {
       const { idx, icon } = unionRender[Math.floor(i * step)];
       if (icon < 0) continue;
       const s = document.createElement('span');
-      s.textContent = ICONS[icon];
+      s.textContent = currentIcons()[icon];
       const { x, y } = cellCenter(idx);
       s.style.left = x + 'px';
       s.style.top = y + 'px';
@@ -1275,10 +1276,10 @@ function initUI() {
     if (inner) {
       /* Custom properties inherit, so the inner motion (scurry, chomp, flap)
          reads the same --delay/--face the outer element carries. */
-      inner.textContent = ICONS[icon];
+      inner.textContent = currentIcons()[icon];
       el.appendChild(inner);
     } else {
-      el.textContent = ICONS[icon];
+      el.textContent = currentIcons()[icon];
     }
     el.addEventListener('animationend', (e) => { if (e.target === el) el.remove(); });
     return el;
@@ -1370,7 +1371,7 @@ function initUI() {
         cell.classList.add(landed ? 'land' : 'filled');
         const ic = document.createElement('span');
         ic.className = 'ic';
-        ic.textContent = ICONS[icon];
+        ic.textContent = currentIcons()[icon];
         cell.appendChild(ic);
       } else if (landed) {
         cell.classList.add('land');
@@ -1427,11 +1428,11 @@ function initUI() {
     let lizardHit = false;
     for (const b of entry.icons) {
       const label = b.perfect ? 'Perfect Match!' : ICON_LABELS[b.icon].replace('!', '');
-      row(ICONS[b.icon] + ' ' + label + ' x' + b.count, b.points);
+      row(currentIcons()[b.icon] + ' ' + label + ' x' + b.count, b.points);
       if (b.icon === LIZARD_ICON) lizardHit = true;
     }
     for (const ms of entry.ms) {
-      row(ICONS[ms.icon] + ' Matching Sets x' + ms.unitCount, ms.points);
+      row(currentIcons()[ms.icon] + ' Matching Sets x' + ms.unitCount, ms.points);
       if (ms.icon === LIZARD_ICON) lizardHit = true;
     }
     if (entry.streakPts > 0) row('\u{1F525} Streak x' + entry.streakK + '!', entry.streakPts, 'streak');
@@ -1492,7 +1493,7 @@ function initUI() {
         if (icon >= 0) {
           const ic = document.createElement('span');
           ic.className = 'ic';
-          ic.textContent = ICONS[icon];
+          ic.textContent = currentIcons()[icon];
           cell.appendChild(ic);
         }
         if (ringAll || (ringSet && ringSet.has(idx))) cell.classList.add('ring');
@@ -2462,6 +2463,7 @@ function initUI() {
   const volSlider = $('volSlider');
   const nickInput = $('nickInput');
   const themeButtons = Array.from(document.querySelectorAll('#themeSeg button'));
+  const iconSetButtons = Array.from(document.querySelectorAll('#iconSetSeg button'));
   const themeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
   /* Build/version line: composed once from the constants (never hardcoded)
@@ -2490,6 +2492,9 @@ function initUI() {
     nickInput.value = meta.nickname;
     for (const b of themeButtons) {
       b.setAttribute('aria-pressed', String(b.dataset.themeChoice === meta.theme));
+    }
+    for (const b of iconSetButtons) {
+      b.setAttribute('aria-pressed', String(b.dataset.iconsetChoice === meta.iconSet));
     }
   }
 
@@ -2585,6 +2590,21 @@ function initUI() {
     applyTheme();
     syncSettingsUI();
     persist();
+  }));
+
+  /* Icon set (skin): only the displayed glyph changes. currentIcons() is read
+     at render time, so re-rendering the board, tray, and items bar is enough
+     to swap every glyph live. */
+  iconSetButtons.forEach((b) => b.addEventListener('click', () => {
+    sound.tap();
+    const id = b.dataset.iconsetChoice;
+    setActiveIconSet(id);
+    meta.iconSet = id;
+    persist();
+    renderBoard();
+    renderTray();
+    updateItemsBar();
+    syncSettingsUI();
   }));
 
   nickInput.addEventListener('change', () => {
@@ -2911,6 +2931,7 @@ function initUI() {
 
   sound.setVolume(meta.volume);
   applyTheme();
+  setActiveIconSet(meta.iconSet); /* before the first render so glyphs boot in the saved set */
   relayout();
   initHelpDiagrams();
   renderBoard();

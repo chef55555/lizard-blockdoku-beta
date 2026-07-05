@@ -1269,6 +1269,10 @@ header { text-align: center; height: 56px; flex: none; }
   cursor: pointer;
 }
 .seg button[aria-pressed="true"] { background: var(--btn-grad); color: #fff; }
+/* Icon-set picker reuses the theme segmented-control (.seg) styles; its
+   buttons carry a small preview glyph before the label, so keep them from
+   wrapping and give the emoji a hair of breathing room. */
+#iconSetSeg button { white-space: nowrap; }
 
 #nickInput,
 #nickPromptInput {

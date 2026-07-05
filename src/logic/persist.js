@@ -1,6 +1,6 @@
 /* Save encode + lenient validation/migration (schema v2). */
 
-import { CELL_COUNT, ICONS } from './config.js';
+import { CELL_COUNT, ICONS, iconSetIds } from './config.js';
 import { SHAPES, SHAPE_CLASSES } from './pieces.js';
 import { clearScore } from './scoring.js';
 import { ITEM_KEYS, ITEM_CAPS, zeroInv, ROTATION_MAP, FLIP_MAP, SCORE_LOG_MAX, STREAK_LOG_MAX } from './items.js';
@@ -17,6 +17,7 @@ function defaultMeta() {
     muted: false,
     volume: 50,
     theme: 'auto',
+    iconSet: 'classic',
     nickname: '',
     nickPrompted: false,
     seenTutorial: false,
@@ -250,6 +251,7 @@ function validateSave(raw) {
   out.muted = raw.muted === true;
   out.volume = clampInt(raw.volume, 0, 100, 50);
   out.theme = ['auto', 'light', 'dark'].includes(raw.theme) ? raw.theme : 'auto';
+  out.iconSet = iconSetIds().includes(raw.iconSet) ? raw.iconSet : 'classic';
   out.nickname = sanitizeNickname(raw.nickname);
   out.nickPrompted = raw.nickPrompted === true;
   out.seenTutorial = raw.seenTutorial === true;

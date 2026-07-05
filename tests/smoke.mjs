@@ -300,6 +300,60 @@ await page.tap('#scoreHelpClose');
 await page.tap('#settingsDone');
 await page.waitForTimeout(100);
 
+console.log('7c2. Settings: icon set switch is live and persists');
+// Board and tray all on icon 1 (index meaning fixed: flower). Classic renders
+// that index as the flower emoji; the Garden skin renders the SAME index as a
+// sunflower. Only the glyph changes, so filled-cell/piece counts and the score
+// must not move, and the choice must survive a reload.
+const CLASSIC_ICON1 = '\u{1F338}'; // classic index 1 (flower)
+const GARDEN_ICON1 = '\u{1F33B}';  // garden index 1 (sunflower)
+{
+  const board = new Array(81).fill(-1);
+  [0, 1, 2].forEach((c) => { board[c] = 1; });
+  await injectSave({
+    v: 2, best: 5,
+    game: {
+      board, tray: [{ shapeId: 0, icon: 1 }, { shapeId: 1, icon: 1 }, { shapeId: 2, icon: 1 }],
+      score: 77, inv: { rotate: 0, undo: 0, freeze: 0 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+const boardGlyph = () => page.locator('.cell.filled .ic').first().textContent();
+const trayGlyph = () => page.locator('.slot .piece .ic').first().textContent();
+const filledBeforeSkin = await filledCount();
+const scoreBeforeSkin = await score();
+const piecesBeforeSkin = await page.locator('.slot .piece').count();
+check('board shows the classic glyph before switching', (await boardGlyph()) === CLASSIC_ICON1, await boardGlyph());
+check('tray shows the classic glyph before switching', (await trayGlyph()) === CLASSIC_ICON1, await trayGlyph());
+await page.tap('#settingsBtn');
+await page.waitForSelector('#settings:not([hidden])');
+await page.tap('#iconSetSeg button[data-iconset-choice="garden"]');
+check('garden button shows pressed',
+  (await page.locator('#iconSetSeg button[data-iconset-choice="garden"]').getAttribute('aria-pressed')) === 'true');
+await page.tap('#settingsDone');
+await page.waitForTimeout(100);
+check('board glyph switched to the garden skin live', (await boardGlyph()) === GARDEN_ICON1, await boardGlyph());
+check('tray glyph switched to the garden skin live', (await trayGlyph()) === GARDEN_ICON1, await trayGlyph());
+check('skin change left the filled-cell count untouched', (await filledCount()) === filledBeforeSkin, 'filled=' + (await filledCount()));
+check('skin change left the piece count untouched', (await page.locator('.slot .piece').count()) === piecesBeforeSkin);
+check('skin change left the score untouched', (await score()) === scoreBeforeSkin, 'score=' + (await score()));
+check('skin saved to the save blob',
+  (await page.evaluate(() => JSON.parse(localStorage.getItem('lizard-blockdoku-v1')).iconSet)) === 'garden');
+await page.reload();
+await page.waitForSelector('.cell');
+await dismissSplash();
+check('garden skin persists across reload (board)', (await boardGlyph()) === GARDEN_ICON1, await boardGlyph());
+check('garden skin persists across reload (tray)', (await trayGlyph()) === GARDEN_ICON1, await trayGlyph());
+check('board count intact after reload', (await filledCount()) === filledBeforeSkin, 'filled=' + (await filledCount()));
+check('score intact after reload', (await score()) === scoreBeforeSkin, 'score=' + (await score()));
+// Return to Classic so later sections start from the default skin.
+await page.tap('#settingsBtn');
+await page.waitForSelector('#settings:not([hidden])');
+await page.tap('#iconSetSeg button[data-iconset-choice="classic"]');
+await page.tap('#settingsDone');
+await page.waitForTimeout(100);
+check('board glyph returns to the classic skin', (await boardGlyph()) === CLASSIC_ICON1, await boardGlyph());
+
 console.log('7d. Items: rotate charges, cancels with a refund, and spins full circle');
 // Slot 0 L4 (shape 16, period 4), slot 1 Line3-H (shape 5, period 2),
 // slot 2 Square (shape 13, symmetric). Two rotates held.

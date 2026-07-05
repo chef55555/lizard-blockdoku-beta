@@ -470,6 +470,42 @@ test('validateSave: v1 saves migrate to v2 defaults', () => {
   assert.strictEqual(Array.from(out.game.frozen).reduce((a, x) => a + x, 0), 0);
   assert.deepStrictEqual(out.game.scoreLog, [], 'v1 has no score history');
   assert.deepStrictEqual(out.game.streakLog, [], 'v1 has no streak history');
+  assert.strictEqual(out.iconSet, 'classic', 'default icon set');
+});
+
+/* ---- Icon sets (alternate skins). Only the DISPLAYED glyph changes per set;
+   indices and their meaning stay fixed, so every set must share the icon
+   count and the setting must round-trip like theme. ---- */
+
+test('icon sets: setActiveIconSet + currentIcons reflect the active set, unknown ids fall back to classic', () => {
+  try {
+    assert.deepStrictEqual(G.currentIcons(), G.ICON_SETS.classic, 'defaults to classic');
+    assert.ok(G.iconSetIds().includes('classic') && G.iconSetIds().includes('garden'), 'classic and garden ids exist');
+    for (const id of G.iconSetIds()) {
+      assert.strictEqual(G.ICON_SETS[id].length, G.ICONS.length, id + ': same icon count as classic');
+    }
+    G.setActiveIconSet('garden');
+    assert.deepStrictEqual(G.currentIcons(), G.ICON_SETS.garden, 'active set switches to garden');
+    G.setActiveIconSet('bogus');
+    assert.deepStrictEqual(G.currentIcons(), G.ICON_SETS.garden, 'an unknown id is ignored (keeps the current set)');
+    G.setActiveIconSet('classic');
+    assert.deepStrictEqual(G.currentIcons(), G.ICON_SETS.classic, 'falls back to classic when selected');
+  } finally {
+    G.setActiveIconSet('classic'); /* never leak the active set into other tests */
+  }
+});
+
+test('validateSave: iconSet accepted from the allow-list, unknown coerced to classic, round-trips', () => {
+  assert.strictEqual(G.defaultMeta().iconSet, 'classic', 'fresh meta defaults to classic');
+  assert.strictEqual(G.validateSave({ v: 2, best: 1, iconSet: 'garden', game: null }).iconSet, 'garden', 'known id kept');
+  assert.strictEqual(G.validateSave({ v: 2, best: 1, iconSet: 'neon', game: null }).iconSet, 'classic', 'unknown id coerced');
+  assert.strictEqual(G.validateSave({ v: 2, best: 1, iconSet: 42, game: null }).iconSet, 'classic', 'non-string coerced');
+  assert.strictEqual(G.validateSave({ v: 2, best: 1, game: null }).iconSet, 'classic', 'absent id defaults to classic');
+  assert.strictEqual(G.validateSave({ v: 1, best: 1 }).iconSet, 'classic', 'v1 save migrates to classic');
+  /* Round-trips through the save write, which spreads ...meta into the blob. */
+  const meta = { ...G.defaultMeta(), iconSet: 'garden' };
+  const roundTrip = G.validateSave(JSON.parse(JSON.stringify({ v: 2, ...meta, game: null })));
+  assert.strictEqual(roundTrip.iconSet, 'garden', 'iconSet survives a full meta round-trip');
 });
 
 test('validateSave: corrupt payloads keep meta, drop game', () => {

@@ -9,6 +9,7 @@ const RELEASE_NOTES = [
       'Reach the top faster: as you drag a piece upward it now leads further ahead of your finger, so you barely have to move to place along the top rows.',
       'Changed your mind about a freeze? A dipped piece now shows a ✕ to un-dip it and get the Freeze back.',
       'Rainbow Perfect Matches! Strawberries burst into rainbow, hearts float off trailing rainbows, lizards leave rainbow tracks, flowers blow away on rainbow gusts, and a butterfly match sweeps a rainbow across the whole screen.',
+      'New look: pick an icon set in Settings. Choose Classic or the new Garden skin (bees, sunflowers, and friends). Your scores and pieces stay exactly the same, only the pictures change.',
     ],
   },
   {
