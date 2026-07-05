@@ -10,6 +10,7 @@
     "test": "node tests/logic.test.js",
     "test:smoke": "node tests/smoke.mjs",
     "test:webkit-drag": "node tests/webkit-drag.mjs",
+    "test:tutorial": "node tests/tutorial-undo.mjs",
     "test:beta": "node tests/beta-check.mjs"
   },
   "keywords": [],

@@ -1885,6 +1885,12 @@ function initUI() {
         for (let c = 0; c < 8; c++) board[4 * N + c] = 1; /* flowers cols 0-7 */
         inv = { ...zeroInv(), undo: 1 };
         tray = [{ shapeId: 0, icon: 3 }, null, null]; /* star single */
+        /* Nothing to rewind until the star is placed. Without this, a snapshot
+           left over from an earlier step lets Undo fire early: it rewinds to
+           that stale state and skips to undo-b with nothing left to undo,
+           dead-ending the tutorial on an empty tray. The star's own placement
+           sets the real snapshot that undo-b then rewinds. */
+        undoSnapshot = null;
       },
       anchor: () => cellEls[4 * N + 8],
       allowDrop: (r, c) => r === 4 && c === 8,

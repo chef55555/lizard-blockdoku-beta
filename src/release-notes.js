@@ -13,6 +13,7 @@ const RELEASE_NOTES = [
       'Freeze fix: a dip that freezes nothing new now returns the Freeze AND lets the waiting sets melt, instead of holding them for free.',
       'Freeze rescue: when the board fills up while a frozen combo is waiting, it now melts to save you with a clear message, so the big save no longer looks like a surprise wipe.',
       'A held Flip now counts when the game checks whether you are truly stuck.',
+      'Tutorial fix: tapping Undo before placing the piece no longer strands the walkthrough with an empty tray.',
       'This "What’s new" list, right here in Settings.',
       'Beta: a Test scenarios panel with preset boards, piece and icon filters, and a 1x1-reroll switch.',
       'Beta: one-tap bug reports that capture the board, the state before your last move, and a log of recent moves, ready to paste or share.',
