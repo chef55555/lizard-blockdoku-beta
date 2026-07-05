@@ -188,6 +188,16 @@ function applyReroll(piece, inv, rng) {
   return { piece: rerollPiece(piece, rng), inv: next, refundedRotate, refundedFlip, refundedFreeze };
 }
 
+/* The inverse of a dip: strip the frozen flag and return the Freeze (clamped to
+   cap). Returns null when there is nothing to un-dip (no piece, or it was not
+   dipped), leaving the inputs untouched. */
+function applyUndip(piece, inv) {
+  if (!piece || !piece.frozen) return null;
+  const next = { ...piece };
+  delete next.frozen;
+  return { piece: next, inv: { ...inv, freeze: Math.min(ITEM_CAPS.freeze, (inv.freeze || 0) + 1) } };
+}
+
 /* Decide what a placement does to the freeze system. union is the Set of
    cells in every completed unit (scanUnits runs on the post-placement,
    pre-clear board, so units frozen on earlier turns are re-found); frozen
@@ -209,4 +219,4 @@ function freezeOutcome(dipped, freezeHold, union, frozen) {
   return { didFreeze, frozeNothingNew, freezeRefund: dipped && !didFreeze };
 }
 
-export { ITEM_KEYS, ITEM_CAPS, zeroInv, fillInv, SCORE_LOG_MAX, STREAK_LOG_MAX, computeEarned, grantItems, rotateShapeCells, flipShapeCells, shapeKeyOf, ROTATION_MAP, FLIP_MAP, applyRotation, applyFlip, rerollPiece, applyReroll, freezeOutcome };
+export { ITEM_KEYS, ITEM_CAPS, zeroInv, fillInv, SCORE_LOG_MAX, STREAK_LOG_MAX, computeEarned, grantItems, rotateShapeCells, flipShapeCells, shapeKeyOf, ROTATION_MAP, FLIP_MAP, applyRotation, applyFlip, rerollPiece, applyReroll, applyUndip, freezeOutcome };

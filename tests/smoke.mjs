@@ -446,6 +446,15 @@ await page.locator('.slot').nth(0).tap();
 check('tapping a piece dips it', (await page.locator('.slot .piece.dipped').count()) === 1);
 check('dip consumes the freeze', (await page.locator('#itemFreeze[disabled]').count()) === 1);
 check('dip does not place anything', (await filledCount()) === 8);
+// Un-dip: the dipped piece shows a badge that returns the Freeze and un-ices it.
+check('dipped piece shows an un-dip badge', (await page.locator('.slot').nth(0).locator('.undip-btn').count()) === 1);
+await page.locator('.slot').nth(0).locator('.undip-btn').tap();
+check('un-dip returns the Freeze and clears the ice',
+  (await page.locator('#itemFreeze .cnt').textContent()) === '1'
+  && (await page.locator('.slot .piece.dipped').count()) === 0);
+await page.tap('#itemFreeze'); // re-dip to continue the melt flow below
+await page.locator('.slot').nth(0).tap();
+check('re-dip consumes the freeze again', (await page.locator('.slot .piece.dipped').count()) === 1);
 await dragPiece(0, 0, 8); // dipped single completes row 0
 await page.waitForTimeout(500);
 check('completed row froze instead of clearing', (await page.locator('.cell.frozen').count()) === 9);

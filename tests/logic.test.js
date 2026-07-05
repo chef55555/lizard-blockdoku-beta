@@ -1190,6 +1190,24 @@ test('applyReroll: refunds clamp at the caps and report false when full', () => 
   assert.strictEqual(res.refundedFreeze, false);
 });
 
+test('applyUndip: null unless a dipped piece is passed', () => {
+  assert.strictEqual(G.applyUndip(null, { freeze: 0 }), null, 'no piece');
+  assert.strictEqual(G.applyUndip({ shapeId: 0, icon: 1 }, { freeze: 0 }), null, 'not dipped');
+});
+
+test('applyUndip: strips the ice, returns the Freeze (clamped), mutates no input', () => {
+  const piece = { shapeId: 5, icon: 3, frozen: true, rotFree: true, rotOrig: 6 };
+  const inv = { rotate: 1, flip: 0, undo: 0, freeze: 1, reroll: 0 };
+  const res = G.applyUndip(piece, inv);
+  assert.strictEqual(res.piece.frozen, undefined, 'ice removed');
+  assert.strictEqual(res.piece.rotFree, true, 'other session flags kept');
+  assert.strictEqual(res.inv.freeze, 2, 'Freeze returned');
+  assert.strictEqual(piece.frozen, true, 'input piece untouched');
+  assert.strictEqual(inv.freeze, 1, 'input inv untouched');
+  const capped = G.applyUndip({ shapeId: 0, icon: 1, frozen: true }, { freeze: G.ITEM_CAPS.freeze });
+  assert.strictEqual(capped.inv.freeze, G.ITEM_CAPS.freeze, 'refund clamps at the cap');
+});
+
 /* ---- Score / streak history ---- */
 
 test('validateSave: history is lenient and never discards the game', () => {

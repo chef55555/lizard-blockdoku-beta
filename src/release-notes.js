@@ -7,6 +7,7 @@ const RELEASE_NOTES = [
     date: '2026-07-05',
     notes: [
       'Reach the top faster: as you drag a piece upward it now leads further ahead of your finger, so you barely have to move to place along the top rows.',
+      'Changed your mind about a freeze? A dipped piece now shows a ✕ to un-dip it and get the Freeze back.',
     ],
   },
   {

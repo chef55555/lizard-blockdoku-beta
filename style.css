@@ -699,6 +699,31 @@ header { text-align: center; height: 56px; flex: none; }
   50% { transform: scale(1.2); box-shadow: 0 0 0 9px rgba(138, 79, 191, 0); }
 }
 
+/* Per-slot un-dip button on a dipped piece: icy, in the bottom-right corner so
+   it never collides with the top-corner transform buttons. */
+.undip-btn {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid #8FC7F0;
+  background: linear-gradient(180deg, #E8F4FF, #D6ECFF);
+  color: #1C3D5A;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+  touch-action: none;
+}
+.undip-btn:active { transform: scale(0.9); }
+:root[data-theme="dark"] .undip-btn {
+  border-color: #3F6E93;
+  background: linear-gradient(180deg, #24405C, #1B3247);
+  color: #DCEEFF;
+}
+
 .item-btn .ic { display: inline-block; }
 #itemRotate.spinning .ic { animation: spin-slow 1.4s linear infinite; }
 @keyframes spin-slow {

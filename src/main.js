@@ -12,7 +12,7 @@ const {
   placePiece, scanUnits, unionCells, clearScore, streakBonus,
   iconBonuses, matchingSetBonuses, ITEM_CAPS,
   SCORE_LOG_MAX, STREAK_LOG_MAX, computeEarned, grantItems, ROTATION_MAP,
-  FLIP_MAP, applyRotation, applyFlip, applyReroll, freezeOutcome, boardToLogString,
+  FLIP_MAP, applyRotation, applyFlip, applyReroll, applyUndip, freezeOutcome, boardToLogString,
   makeScoreLogEntry, pushLog, takeSnapshot, genTray, isGameOver,
   rotationRescues, flipRescues, isGameOverWithRotate, isGameOverWithItems, defaultMeta,
   encodeGame, sanitizeNickname, validateSave,
@@ -336,6 +336,9 @@ function initUI() {
       const piece = tray[i];
       if (!piece) return;
       slot.appendChild(buildPieceEl(piece, '--tray-cell'));
+      /* A dipped piece can be un-iced to get the Freeze back. Hidden in the
+         tutorial, which drives its own crafted freeze flow. */
+      if (piece.frozen && !tutorial) slot.appendChild(buildUndipBtn(i));
       /* Symmetric shapes have nothing to transform, so no arrow. When a
          transform is the only move left, the arrow pulses to point the way. */
       if ((inv.rotate > 0 || piece.rotFree) && ROTATION_MAP[piece.shapeId] !== piece.shapeId) {
@@ -368,6 +371,20 @@ function initUI() {
     b.setAttribute('aria-label', cfg.label + ' this piece' + (free ? ' (free)' : ''));
     b.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); });
     b.addEventListener('pointerup', (e) => { e.stopPropagation(); transformSlot(i, kind); });
+    return b;
+  }
+
+  /* Per-slot un-dip button on a dipped piece: cancel the pending freeze and get
+     the Freeze back. Like the transform buttons, its pointerdown never reaches
+     the slot, so tapping it can never begin a drag. */
+  function buildUndipBtn(i) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'undip-btn';
+    b.textContent = '✕'; /* multiplication X */
+    b.setAttribute('aria-label', 'Un-dip this piece and return the Freeze');
+    b.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); });
+    b.addEventListener('pointerup', (e) => { e.stopPropagation(); undipPiece(i); });
     return b;
   }
 
@@ -1720,6 +1737,22 @@ function initUI() {
     updateItemsBar();
     persist();
     if (tutorial) tutAdvance();
+  }
+
+  /* Cancel a pending dip: return the Freeze and un-ice the still-unplaced piece
+     (the inverse of dipPiece). Not offered during the tutorial. */
+  function undipPiece(slot) {
+    if (state !== 'IDLE' || tutorial) return;
+    const res = applyUndip(tray[slot], inv);
+    if (!res) return;
+    tray[slot] = res.piece;
+    inv = res.inv;
+    logAction('undip s' + slot + ' #' + res.piece.shapeId);
+    showToast('item-toast', '❄️ Freeze returned');
+    sound.tap();
+    renderTray();
+    updateItemsBar();
+    persist();
   }
 
   /* ---- Reroll: arm from the bar, then tap a tray piece to swap it ---- */
